@@ -79,8 +79,8 @@
 ///               transposed-matrix vector multiplications.
 /// \param[in]  exponent
 ///             The exponent parameter \c p in the trace of the expression
-///             $f((\mathbf{A} + t \mathbf{B})^p)$. The exponent is a real
-///             number and by default it is set to \c 1.0.
+///             \f$ f((\mathbf{A} + t \mathbf{B})^p) \f$. The exponent is a
+///             real number and by default it is set to \c 1.0.
 /// \param[in]  orthogonalize
 ///             Indicates whether to orthogonalize the orthogonal eigenvectors
 ///             during Lanczos recursive iterations.
@@ -95,6 +95,15 @@
 ///             * If set to an integer larger than \c lanczos_degree, it is cut
 ///               to \c lanczos_degree, which effectively orthogonalizes
 ///               against all previous eigenvectors (full reorthogonalization).
+/// \param[in]  seed
+///             A non-negative integer to be used as seed to initiate the
+///             generation of sequences of peudo-random numbers in the
+///             algorithm. This is useful to make the result of the randomized
+///             algorithm to be reproducible. If a negative integer is given,
+///             the given seed value is ignored and the current processor time
+///             is used as the seed to initiate he generation random  number
+///             sequences. In this case, the result is not reproducible,
+///             rather, is pseudo-random.
 /// \param[in]  lanczos_degree
 ///             The number of Lanczos recursive iterations. The operator \c A
 ///             is reduced to a square tridiagonal (or bidiagonal) matrix of
@@ -138,6 +147,10 @@
 /// \param[in]  num_threads
 ///             Number of OpenMP parallel processes. The parallelization is
 ///             implemented over the Monte-Carlo iterations.
+/// \param[in]  num_gpu_devices
+///             Number of GPU devices to use. This is the number of CPU threads
+///             to be created to handle each GPU device in parallel for each
+///             CPU thread.
 /// \param[out] trace
 ///             The output trace of size \c num_inquiries. These values are the
 ///             average of the rows of \c samples array.
@@ -189,6 +202,7 @@ FlagType cuTraceEstimator<DataType>::cu_trace_estimator(
         const FlagType gram,
         const DataType exponent,
         const FlagType orthogonalize,
+        const int64_t seed,
         const IndexType lanczos_degree,
         const DataType lanczos_tol,
         const IndexType min_num_samples,
@@ -217,14 +231,14 @@ FlagType cuTraceEstimator<DataType>::cu_trace_estimator(
     // Allocate 1D array of random vectors We only allocate a random vector
     // per parallel thread. Thus, the total size of the random vectors is
     // matrix_size*num_threads. On each iteration in parallel threads, the
-    // alocated memory is resued. That is, in each iteration, a new random
+    // allocated memory is reused. That is, in each iteration, a new random
     // vector is generated for that specific thread id.
     IndexType random_vectors_size = matrix_size * num_gpu_devices;
     DataType* random_vectors = new DataType[random_vectors_size];
 
     // Initialize random number generator to generate in parallel threads
     // independently.
-    RandomNumberGenerator random_number_generator(num_gpu_devices);
+    RandomNumberGenerator random_number_generator(num_gpu_devices, seed);
 
     // The counter of filled size of processed_samples_indices array
     // This scalar variable is defined as array to be shared among al threads
@@ -349,8 +363,8 @@ FlagType cuTraceEstimator<DataType>::cu_trace_estimator(
 ///               transposed-matrix vector multiplications.
 /// \param[in]  exponent
 ///             The exponent parameter \c p in the trace of the expression
-///             $f((\mathbf{A} + t \mathbf{B})^p)$. The exponent is a real
-///             number and by default it is set to \c 1.0.
+///             \f$ f((\mathbf{A} + t \mathbf{B})^p) \f$. The exponent is a
+///             real number and by default it is set to \c 1.0.
 /// \param[in]  orthogonalize
 ///             Indicates whether to orthogonalize the orthogonal eigenvectors
 ///             during Lanczos recursive iterations.
@@ -421,7 +435,7 @@ void cuTraceEstimator<DataType>::_cu_stochastic_lanczos_quadrature(
     IndexType matrix_size = A->get_num_rows();
 
     // Fill random vectors with Rademacher distribution (+1, -1), normalized
-    // but not orthogonalized. Settng num_threads to zero indicates to not
+    // but not orthogonalized. Setting num_threads to zero indicates to not
     // create any new threads in RandomNumbrGenerator since the current
     // function is inside a parallel thread.
     IndexType num_threads = 0;

@@ -10,40 +10,50 @@ on:
 
 jobs:
     build_wheels:
-        name: Build wheels on ${{ matrix.os }}
+        name: Build wheels, ${{ matrix.os }}, ${{ matrix.python-version }}
         runs-on: ${{ matrix.os }}
         strategy:
             fail-fast: false
             matrix:
                 os: [ubuntu-latest, windows-latest, macos-latest]
-                
+                python-version: ['cp39', 'cp310', 'cp311', 'cp312', 'pp38', 'pp39', 'pp310']
+                exclude:
+                    - os: windows-latest
+                      python-version: 'pp38'
+                    - os: windows-latest
+                      python-version: 'pp39'
+                    - os: windows-latest
+                      python-version: 'pp310'
         steps:
             - name: Checkout
-              uses: actions/checkout@v2
+              uses: actions/checkout@v4
             
             - name: Setup Python 
-              uses: actions/setup-python@v2
+              uses: actions/setup-python@v4
+              with:
+                python-version: '3.12'
 
-            - name: Install cibuildwheel
-              run: |
-                  python -m pip install cibuildwheel==1.11.0
-
-            - name: Install numpy
-              run: |
-                  python -m pip install --upgrade pip
-                  python -m pip install --upgrade numpy
-
-            - name: Install OpenMP and numpy for mac
+            - name: Install OpenMP for mac
               if: runner.os == 'macos'
               run: |
+                  # Starting from libomp>=15.0, the libomp installation in homebrew is "keg-only",
+                  # meaning that libomp is only installed in homebrew's directory, but not moved
+                  # to /usr/local to avoid other OpenMP installations (such as with gcc's version
+                  # of OpenMP). To use the homebrew's version of OpenMP,the following symbolic
+                  # links are created. Without these, the installation will fail with the error
+                  # of "fatal error: omp.h file found"
                   brew install libomp
+                  libomp_dir=$(brew --prefix libomp)
+                  ln -sf ${libomp_dir}/include/omp-tools.h  /usr/local/include/omp-tools.h
+                  ln -sf ${libomp_dir}/include/omp.h        /usr/local/include/omp.h
+                  ln -sf ${libomp_dir}/include/ompt.h       /usr/local/include/ompt.h
+                  ln -sf ${libomp_dir}/lib/libomp.a         /usr/local/lib/libomp.a
+                  ln -sf ${libomp_dir}/lib/libomp.dylib     /usr/local/lib/libomp.dylib
 
-                  # This is needed to import numpy in pypy3 (but not needed for
-                  # pypy2 and CPython)
-                  # brew install openblas
-                  # OPENBLAS="$(brew --prefix openblas)"
-                  # brew install lapack
-                  # pip3 install numpy
+            # Without this, installing cuda give error: no much space left on device
+            - name: Clear Cache
+              if: matrix.os != 'windows-latest'
+              run: rm -rf /opt/hostedtoolcache 
 
             # To install CUDA in windows, uncomment the following lines. Note
             # that the Jimver@cuda-toolkit action (below) can only install cuda
@@ -55,34 +65,48 @@ jobs:
             # support".
             - name: Install CUDA
               if: matrix.os == 'windows-latest'
-              uses: Jimver/cuda-toolkit@v0.2.1
+              uses: Jimver/cuda-toolkit@v0.2.11
               id: cuda-toolkit
               with:
-                  cuda: '11.2.2'
+                  cuda: '12.1.0'
+                  # method: 'network'
+                  # sub-packages: '["nvcc", "visual_studio_integration"]'
+                  # non-cuda-sub-packages: '["libcublas", "libcusparse"]'
 
             # Build wheel for windows with CUDA enabled. Note that cibuildwheel
             # does not need manylinux docker, thuns, CUDA can be installed in
             # the github action's virtual machine using the Jimver's action
             # in the previous action (see above).
-            - name: Build wheels in windows with CUDA support
+            - name: Build wheels in windows with CUDA (X86_64) Python ${{ matrix.python-version }}
               if: matrix.os == 'windows-latest'
-              run: python -m cibuildwheel --output-dir wheelhouse
+              uses: pypa/cibuildwheel@v2.15.0
               env:
-                  CIBW_BUILD: "*-manylinux_x86_64 *-macosx_x86_64 *-win_amd64"
-                  CIBW_SKIP: "pp* cp27-* cp35-*"
-                  CIBW_BUILD_VERBOSITY: 1
+                  CIBW_ARCHS_WINDOWS: "AMD64 x86"
+                  CIBW_BUILD: "${{ matrix.python-version }}-win_amd64"
+                  CIBW_SKIP: "pp* cp36-* cp37-* cp38-*"
+                  CIBW_BUILD_VERBOSITY: 3
                   CIBW_ENVIRONMENT: "USE_LONG_INT=0 USE_UNSIGNED_LONG_INT=0 USE_CBLAS=0 USE_CUDA=1 CUDA_DYNAMIC_LOADING=1"
+                  CIBW_BEFORE_BUILD_WINDOWS: "pip install delvewheel"
+                  CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: "delvewheel repair -w {dest_dir} {wheel}"
+              with:
+                output-dir: wheelhouse
            
-            # Do not enable compiling with CUDA for macos since NIVDIA no
-            # longer supports CUDA in the macos.
-            - name: Build wheels in mac without CUDA support
+            # Do not enable compiling with CUDA for macos since NIVDIA no longer supports CUDA in the macos.
+            # Build wheel for macos X86_64.
+            # Note that wheels for macos ARM64 will be built on cirrus ci (see /tools/ci)
+            - name: Build wheels in mac without CUDA (X86_64) Python ${{ matrix.python-version }}
               if: matrix.os == 'macos-latest'
-              run: python -m cibuildwheel --output-dir wheelhouse
+              uses: pypa/cibuildwheel@v2.15.0
               env:
-                  CIBW_BUILD: "*-manylinux_x86_64 *-macosx_x86_64 *-win_amd64"
-                  CIBW_SKIP: "pp* cp27-* cp35-*"
-                  CIBW_BUILD_VERBOSITY: 1
-                  CIBW_ENVIRONMENT: "USE_CBLAS=0 USE_CUDA=0"
+                  CIBW_ARCHS_MACOS: "x86_64"
+                  CIBW_BUILD: "${{ matrix.python-version }}-macosx_x86_64"
+                  CIBW_SKIP: "pp37-* cp36-* cp37-* cp38-*"
+                  CIBW_BUILD_VERBOSITY: 3
+                  CIBW_ENVIRONMENT: "USE_LONG_INT=0 USE_UNSIGNED_LONG_INT=0 USE_CBLAS=0 USE_CUDA=0 PKG_CONFIG_PATH='/usr/local/opt/openblas/lib/pkgconfig'"
+                  # The gcc below installs gfortran. gfortran and openblas are only needed for pypy as it compiles scipy from source.
+                  CIBW_BEFORE_BUILD: brew install libomp; brew reinstall gcc; bash ./tools/wheels/install_openblas.sh "${{ matrix.python-version }}"
+              with:
+                output-dir: wheelhouse
 
             # Enable compiling with CUDA, only for linux. Note that cuda must
             # be installed "inside" the manylinux docker image, not in the main
@@ -97,47 +121,59 @@ jobs:
             # increase (cuda libs are large), and the  manylinux wheel can be
             # uploaded to pypi (pypi has 100MB upload limit). On the down side,
             # the user has to install cuda library themselves.
-            - name: Build wheels in linux with CUDA support
+            # Note that wheels for linux AARCH64 will be built on cirrus ci (see /tools/ci)
+            - name: Build wheels in linux with CUDA (X86_64) Python ${{ matrix.python-version }}
               if: matrix.os == 'ubuntu-latest'
-              run: python -m cibuildwheel --output-dir wheelhouse
+              uses: pypa/cibuildwheel@v2.15.0
               env:
-                  CIBW_MANYLINUX_X86_64_IMAGE: sameli/manylinux2014_x86_64_cuda_11
+                  CIBW_MANYLINUX_X86_64_IMAGE: sameli/manylinux2014_x86_64_cuda_12.3
                   # CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
                   # CIBW_BEFORE_ALL_LINUX: chmod +x .github/scripts/install_cuda.sh && .github/scripts/install_cuda.sh
-                  CIBW_BUILD: "*-manylinux_x86_64 *-macosx_x86_64 *-win_amd64"
-                  CIBW_SKIP: "pp* cp27-* cp35-*"
+                  CIBW_ARCHS_LINUX: "x86_64"
+                  CIBW_BUILD: "${{ matrix.python-version }}-manylinux_x86_64"
+                  CIBW_SKIP: "pp37-* cp36-* cp37-* cp38-*"
                   CIBW_BUILD_VERBOSITY: 1
                   CIBW_ENVIRONMENT: "USE_LONG_INT=0 USE_UNSIGNED_LONG_INT=0 USE_CBLAS=0 USE_CUDA=1 CUDA_DYNAMIC_LOADING=1 CUDA_HOME=/usr/local/cuda"
-            
-            - name: Upload artifacts
-              uses: actions/upload-artifact@v2
+                  CIBW_BEFORE_BUILD: bash ./tools/wheels/install_openblas.sh "${{ matrix.python-version }}"
               with:
+                output-dir: wheelhouse
+
+            # Upload all wheels to an artifact
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: artifacts-wheel-${{ matrix.os }}-${{ matrix.python-version }}
                   path: ./wheelhouse/*.whl
                   retention-days: 1
-                  
+
     build_sdist:
         name: Build source distribution
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@v2
+              uses: actions/checkout@v3
 
             - name: Install Python
-              uses: actions/setup-python@v2
-            
+              uses: actions/setup-python@v4
+              with:
+                python-version: '3.12'
+
             - name: Build sdist
-              run: python setup.py sdist
+              run: |
+                python -m pip install build
+                python -m build . --sdist
             
             - name: Upload artifacts
-              uses: actions/upload-artifact@v2
+              uses: actions/upload-artifact@v4
               with:
+                  name: artifacts-sdist
                   path: dist/*.tar.gz
                   retention-days: 1
 
     upload_pypi:
         needs: [build_wheels, build_sdist]
         runs-on: ubuntu-latest
-        name: Publish to PyPi
+        name: Publish to PyPI
         
         # To upload to PyPI on every tag starting with 'v', use the following:
         # if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v')
@@ -145,13 +181,14 @@ jobs:
         # if: github.event_name == 'release' && github.event.action == 'published'
         steps:
             - name: Download artifacts
-              uses: actions/download-artifact@v2
+              uses: actions/download-artifact@v4
               with:
-                  name: artifact
+                  pattern: artifacts-*
+                  merge-multiple: true
                   path: dist
-            
+
             - name: Upload to PyPi
-              uses: pypa/gh-action-pypi-publish@master
+              uses: pypa/gh-action-pypi-publish@release/v1
               with:
                   verbose: true
                   user: __token__
@@ -159,7 +196,7 @@ jobs:
 
     test_pypi:
         needs: [upload_pypi]
-        name: Test on ${{ matrix.os }} and Pyhton ${{ matrix.python-version }}
+        name: Test on ${{ matrix.os }} and Python ${{ matrix.python-version }}
         runs-on: ${{ matrix.os }}
         strategy:
             fail-fast: false
@@ -170,11 +207,11 @@ jobs:
                 # other required dependencies (like matplotlib, etc) need to be
                 # compiled on pypy.
                 # python-version: ['3.6', '3.7', '3.8', '3.9', 'pypy-3.6', 'pypy-3.7']
-                python-version: ['3.6', '3.7', '3.8', '3.9']
+                python-version: ['3.9', '3.10', '3.11', '3.12']
 
         steps:
             - name: Setup Python ${{ matrix.python-version }}
-              uses: actions/setup-python@v2
+              uses: actions/setup-python@v4
               with:
                   python-version: ${{ matrix.python-version }}
 
@@ -183,9 +220,9 @@ jobs:
               run: |
                   python -m pip install --upgrade pip
                   python -m pip install pytest-cov
-                  python -m pip install imate
+                  python -m pip install --prefer-binary --upgrade imate
 
-            # This does not install plot packages (matplotlib, seaborn) when
+            # This does not install plot packages (matplotlib) when
             # using pypy, since on pypy37, the kiwisolver (a dependency of
             # matlotlib) has no wheel candicate.
             # - name: Install packages
@@ -196,10 +233,9 @@ jobs:
             #       python -m pip install imate
 
             - name: Checkout
-              uses: actions/checkout@v2
+              uses: actions/checkout@v3
 
             - name: Test
               run: |
                   mv imate imate-DoNotImport
-                  rm tests/test_cu_linear_operator.py  # this raises ImportError
                   pytest

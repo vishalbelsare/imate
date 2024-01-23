@@ -50,6 +50,7 @@ cpdef trace_estimator(
         lanczos_degree,
         lanczos_tol,
         orthogonalize,
+        seed,
         num_threads,
         num_gpu_devices,
         verbose,
@@ -115,7 +116,7 @@ cpdef trace_estimator(
         num_threads = openmp.omp_get_max_threads()
 
     # Check operator A, and convert to a linear operator (if not already)
-    Aop = get_operator(A)
+    Aop = get_operator(A, gram)
 
     # data type name is either float32 (float), float64 double), or float128
     # (long double). This will be used to choose a template function
@@ -135,8 +136,13 @@ cpdef trace_estimator(
     error_atol, error_rtol = check_arguments(
             gram, exponent, min_num_samples, max_num_samples, error_atol,
             error_rtol, confidence_level, outlier_significance_level,
-            lanczos_degree, lanczos_tol, orthogonalize, num_threads,
+            lanczos_degree, lanczos_tol, orthogonalize, seed, num_threads,
             num_gpu_devices, verbose, plot, gpu)
+
+    # Seed value None means using processor time as seed. This is indicated by
+    # a inegative integer in the C part of the code.
+    if seed is None:
+        seed = -1
 
     # Set the default value for the "epsilon" of the slq algorithm
     if lanczos_tol is None:
@@ -217,6 +223,7 @@ cpdef trace_estimator(
             int(gram),
             exponent,
             orthogonalize,
+            seed,
             lanczos_degree,
             lanczos_tol,
             min_num_samples,
@@ -251,6 +258,7 @@ cpdef trace_estimator(
             int(gram),
             exponent,
             orthogonalize,
+            seed,
             lanczos_degree,
             lanczos_tol,
             min_num_samples,
@@ -274,7 +282,8 @@ cpdef trace_estimator(
     cpu_proc_time = time.process_time() - init_proc_time
 
     # Matrix size info
-    matrix_size = Aop.get_num_rows()
+    matrix_rows = Aop.get_num_rows()
+    matrix_cols = Aop.get_num_columns()
     matrix_nnz = Aop.get_nnz()
     matrix_density = Aop.get_density()
     sparse = Aop.is_sparse()
@@ -286,7 +295,7 @@ cpdef trace_estimator(
             'data_type': data_type_name,
             'gram': gram,
             'exponent': exponent,
-            'size': matrix_size,
+            'size': (matrix_rows, matrix_cols),
             'sparse': sparse,
             'nnz': matrix_nnz,
             'density': matrix_density,
@@ -335,6 +344,7 @@ cpdef trace_estimator(
             'lanczos_degree': lanczos_degree,
             'lanczos_tol': lanczos_tol,
             'orthogonalize': orthogonalize,
+            'seed': seed,
             'method': 'slq',
         }
     }
@@ -348,7 +358,8 @@ cpdef trace_estimator(
     # Fill arrays of info depending on whether output is scalar or array
     if output_is_array:
         info['error']['absolute_error'] = error
-        info['error']['relative_error'] = error / numpy.abs(trace)
+        info['error']['relative_error'] = \
+            error / (numpy.abs(trace) + numpy.finfo(float).eps)
         info['convergence']['converged'] = converged.astype(bool)
         info['convergence']['num_samples_used'] = num_samples_used
         info['convergence']['num_outliers'] = num_outliers
@@ -356,7 +367,8 @@ cpdef trace_estimator(
         info['convergence']['samples_mean'] = trace
     else:
         info['error']['absolute_error'] = error[0]
-        info['error']['relative_error'] = error[0] / numpy.abs(trace[0])
+        info['error']['relative_error'] = \
+            error[0] / (numpy.abs(trace[0]) + numpy.finfo(float).eps)
         info['convergence']['converged'] = bool(converged[0])
         info['convergence']['num_samples_used'] = num_samples_used[0]
         info['convergence']['num_outliers'] = num_outliers[0]

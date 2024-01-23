@@ -42,12 +42,12 @@ Some notes to myself when completing the documentation later.
   ``this->dot()``function. Previously, the ``dot()`` function had ``const``
   at the end of its signature. However, because we call ``allocate_buffer``,
   and it changes a member data, the ``dot()`` function for this class and
-  ALL of its base classes, and even the other non-cuda classes that are
+  ALL of its base classes, and even the other non-CUDA classes that are
   derived from the ``cLinearOperator`` class has to be non ``const`` member
   functions.
 
   If I can be certain that the buffer size is always zero, I can return back
-  the constness to these functions and do not call the allocate buffer.
+  the const-ness to these functions and do not call the allocate buffer.
   Or, I can call allocate buffer to compute the buffer size, but do not
   allocate it. In this case, I should do ``assert(buffer_size==0)`` just in
   case if in some applications it has to be non-zero buffer.
@@ -107,52 +107,145 @@ Some notes to myself when completing the documentation later.
   https://scicomp.stackexchange.com/questions/10630/full-rank-update-to-cholesky-decomposition
 
 ====
-Name
-====
-
-Implicit Matrix Trace Estimator: imte, >>"imate"<<, imtraes, "imtrest",
-    "tracest", "imtest"
-Fast Trace Estimator
-"scikit-trace"
-
-====
 TODO
 ====
 
 * Implement ``keep`` functionality for slq method.
-* Hutchinson methed can be implemented in C++ and also in CUDA on GPU.
+* Hutchinson method can be implemented in C++ and also in CUDA on GPU.
 * Other functions (besides traceinv and logdet)
 * doxygen for c_linear_operator and its derived classes
 * Get memory usage info for GPU. See for example:
   https://stackoverflow.com/questions/15966046/cudamemgetinfo-returns-same-amount-of-free-memory-on-both-devices-of-gtx-690
+* for the return of functions, instead of outputting (trace, info) tuple, only
+  return trace. However, in the arguments, include "full_output=False". If
+  True, it then outputs the dictionary of info. See scipy.optimize.fsolve.
+  https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.fsolve.html
+* Check compilation with CUDA 12.
+* Imate compiled with scipy==1.9.3 leads to the following runtime error:
+
+    File "imate/_c_trace_estimator/py_c_trace_estimator.pyx", line 1, in init
+    imate._c_trace_estimator.py_c_trace_estimator
+    ImportError: scipy.special.cython_special does not export expected C
+    function __pyx_fuse_0erfinv
+
+  When imate is installed with conda, unfortunately, scipy=1.9.3 is installed
+  with imate, and it causes the above error. This also causes some tests to
+  fail (test/test_logdet.py, etc) when running deploy_conda.yaml.
+
+  The issue seems to be related to inverse of error function. An alternative
+  method (instead of erfinv from scipy.special) is to implement erfinv myself.
+  See:
+
+  Some short codes in C for inverse off error functions
+  https://stackoverflow.com/questions/27229371/inverse-error-function-in-c
+
+  or
+
+  A github script in C++
+  https://github.com/lakshayg/erfinv
+
+  I may do something like:
+
+  try:
+    from scipy.special.cython_special cimport erfinv
+  except:
+    from ._erfinv cimport erfinv  # my implementation
 
 ========================
 Compile and Build Issues
 ========================
 
-------------------
-Local Installation
-------------------
+-----------------------------------------
+Compile issues arising specifically on CI
+-----------------------------------------
 
-- Python 2.7:
-  I dropped support for python 2.7, since
-  ``scipy.special.cython_special.erfinv`` is not defined in the latest scipy
-  that can be installed in python 2.7, which is scipy 1.2.3. The function
-  ``erfinv`` exists in scipy as *python* function, but not as a *cyhton*
-  function in ``cython_special``. The first version of scipy that includes
-  ``erfinv`` as cython function is scipy 1.5.0.
+The configurations below raise issue, not because these configurations cannot
+be compiled, rather, they arise on continuous integration (CI) environments.
 
-- Pythn 3.5:
-  For some reasons, this package cannot be installed on python 3.5. However,
-  py35 is deprecated as of last year.
+.....
+Linux
+.....
 
-- pypy:
-  Build on pypy is only suppported on Linux. The package cannot be built on
-  pypy on windows and macos. On Linux, pypy-3.6 and pypy-3.7 is supported.
+- pypy on linux AARCH64:
+  We build all AARCH64 wheels on Cirrus CI. For CPython, we build wheels on
+  both deploy-conda and deploy-pypi. For PyPy, we only build wheels on
+  deploy-pypi (we do not build pypy wheels on conda).
 
-- CUDA support:
-  CUDA is only availble in linux and windows. NVIDIA no longer supports CUDA in
-  macos, and Apple does not include NVIDA in apple products either.
+  The PyPy wheels for linux (which are built with cuda support) on aarch64
+  on cirrus ci takes more than 60 minutes, and cirrus ci terminates these
+  jobs. As such, we do not support wheels for pypy-linux-aarch64.
+
+  In contrast, pypy-macos-arm64 builds fine on cirrus ci, and this is because
+  on macos, we do not support cuda, hence, the compile time is not long.
+
+-----------------------
+Issues with local build
+-----------------------
+
+.....
+MacOS
+.....
+
+We do not support CUDA for macos, as Apply do not support NVIDIA GPUs.
+
+.......
+Windows
+.......
+
+The following compilation issues are not due to CI runners, rather these
+configurations below cannot be compiled even on a local machine.
+
+- pypy on windows:
+  Build on pypy is only supported on Linux and macos. The package cannot be
+  built on pypy on windows. This is because imate depends on scipy not only at
+  runtime, but also "at compile time" to compile lapack dependency (recall
+  that imate "cimports" scipy.linalg.cython_lapack). Whenever we "import
+  (not import, but cimport), that dependency becomes compile-time dependency.
+
+  Scipy does not have wheel on windows for PyPy. Hence, PyPy tries to
+  compile scipy from source whenever PyPy compiles imate. But there are two
+  issues with PyPy compiling scipy:
+  1. The compilation process raises error that gfortran is not found.
+     This can be easily resolved by: "choco install mingw". As such, the
+     meson.build (build manager in scipy) will use mingw rather than MSVC, and
+     mingw has fortran.
+  2. After the above issue is resolved, another error arises, ans that is that
+     build process cannot find openblas. Scipy finds openblas by internally
+     installing a package called 'scipy_openblas32'. But even installing it
+     does not fix the issue. As of now, I cannot figure how to resolve this.
+
+  Because of the issue, we do not support wheelsL
+  - pp*-win-arm64 and
+  - pp*-win-amd64.
+
+- ARM64 on windows:
+  I built all ARM64 wheels for Linux and MacOS on native ARM64 machines on
+  Cirrus CI. However, for Windows, the ARM64 wheels can be cross-compiled on
+  an X86_64 machine (not native build is needed). This can be done on github
+  runners which are X86_64 machines, and passing ARM64 flags to cibuildwheel.
+
+  Cibuildwheel can cross-compile for ARM64 (from a X86_64 host machine) for
+  windows only if the python package is built based on setuptools, but not
+  based on meson.build. As such, my other package, special_functions, which
+  uses meson.build, cannot be build for Windows ARM64. However, glearn can, and
+  indeed, it compiles for win-arm64 just fine, as glearn uses setuptools.
+
+  Imate also uses setuptools, however, it raises some errors when it is cross
+  compiled for win-arm64. I think this is due to CUDA. So, disabling cuda might
+  allow building for arm64.
+
+  Even if I can build imate for win-arm64, it is still useless, as at runtime,
+  imate needs numpy and scipy. But numpy and scipy do not provide win-arm64
+  wheels neither in cpython nor in pypy. Thus, a user of the package will not
+  have these essential packages (numpy, scipy), even if I provide them wheel
+  for imate.
+
+  Because of the above issue, we do not support wheels:
+  - pp*-win-arm64, and
+  - cp*-win-arm64.
+
+  The only windows-based wheel that we support is:
+  - cp*-win-amd64 (X86_64 and CPyhton on windows)
 
 =====
 Ideas
@@ -233,8 +326,8 @@ Here is how it should work:
    >>> # Here, all the previous theta and tau from previous samples are purged,
    >>> # since "lanczos_degree" is changed, which changes theta and tau sizes.
    >>> # Runtime: 10 seconds
-    >>> Aop.traceinv(method='slq', parameters=[9, 10], lanczos_degree=60,
-                     min_num_samples=10, max_num_samples=100, error_rtol=1e-3)
+   >>> Aop.traceinv(method='slq', parameters=[9, 10], lanczos_degree=60,
+                    min_num_samples=10, max_num_samples=100, error_rtol=1e-3)
 
 ==================
 Method Limitations
@@ -244,7 +337,7 @@ Method Limitations
   eigenvalues. If the lanczos degree is ``m``, and it the input matrix's
   eigenvalues have at most ``m`` significant eigenvalues, then the SLQ method
   performs well. Covariance matrices usually have such property, where most of
-  their eigenvalues are zero zero, but a small number of them are significant.
+  their eigenvalues are zero, but a small number of them are significant.
 
 =========================
 Implementation Techniques
@@ -263,33 +356,17 @@ Implementation Techniques
   independent sequences of random numbers on each thread. The random array
   generator can be used on 2^64 parallel threads, each generating a sequence
   of 2^128 long.
-- The basic algebra module seems to perform faster than OpenBlas. Not only
-  that, for very large arrays, the dot product is more accurate than OpenBlas,
+- The basic algebra module seems to perform faster than OpenBLAS. Not only
+  that, for very large arrays, the dot product is more accurate than OpenBLAS,
   since the reduction variable is cast to long double.
 
+=============
+Documentation
+=============
 
-==================
-Installation Notes
-==================
+Things yet remained in the documentation to be completed:
 
---------
-OpenBlas
---------
-
-Install Openblas with conda. This is especially useful if you don't have admin access to install with apt.
-
-.. code::
-
-    conda install -c anaconda openblas
-
-or with ``apt`` (needs admin access)
-
-.. code::
-
-    sudo apt-get install libopenblas-dev
-
-Or in macos with brew by:
-
-.. code::
-
-    brew install openblas
+* docs/source/performance/interpolation.rst
+* a Few more tutorials in jupyter notebook
+* Incorporate /imate/examples (reproduce results of  interpolation paper) into
+  the documentation.

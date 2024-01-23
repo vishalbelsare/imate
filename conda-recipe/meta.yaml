@@ -10,7 +10,7 @@ source:
 
 # build:
 #     number: 0
-#     script:  
+#     script:
 #         - {{ PYTHON }} -m pip install . --single-version-externally-managed --record=record.txt --ignore-installed --no-cache-dir -vvv
 
 requirements:
@@ -22,9 +22,8 @@ requirements:
     host:
         - python {{ python }}
         - setuptools
-        - numpy>1.11
         - scipy>=1.5
-        - cython>=0.29
+        - cython>=0.29,<3.0
         - pip
         - llvm-openmp  # [osx]
     run:
@@ -33,7 +32,6 @@ requirements:
         - scipy>=1.5
         - suitesparse
         - matplotlib
-        - seaborn
         - llvm-openmp  # [osx]
 
 test:

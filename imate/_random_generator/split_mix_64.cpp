@@ -14,8 +14,8 @@
 // =======
 
 #include "./split_mix_64.h"
+#include "./highres_time_stamp.h"  // get_highres_time_stamp
 #include <cassert>  // assert
-#include <ctime>  // std::time
 
 
 // ===========
@@ -25,38 +25,25 @@
 /// \brief Constructor. Initializes the state with current time.
 ///
 
-SplitMix64::SplitMix64()
+SplitMix64::SplitMix64(const int64_t seed_)
 {
-    // std::time gives the second since epoch. This, if this function is called
-    // multiple times a second, the std::time() results the same number. To
-    // make it differ between each milliseconds, the std::clock is added, which
-    // is the cpu time (in POSIX) or wall time (in windows) and in the unit of
-    // system's clocks per second.
-    uint64_t seed = static_cast<uint64_t>(std::time(0)) +
-                    static_cast<uint64_t>(std::clock());
+    // Seed the random generating algorithm with a high resolution time counter
+    uint64_t seed;
+
+    if (seed_ >= 0)
+    {
+        seed = static_cast<uint64_t>(seed_);
+    }
+    else
+    {
+        // Negative integer is a flag to indicate using time to generate a seed
+        seed = get_highres_time_stamp();
+    }
 
     // Seeding as follow only fills the first 32 bits of the 64-bit integer.
     // Repeat the first 32 bits on the second 32-bits to create a better 64-bit
     // random number
     this->state = (seed << 32) | seed;
-}
-
-
-// ===========
-// Constructor
-// ===========
-
-/// \brief     Constructor. Initializes the state with an input integer.
-///
-/// \param[in] state_
-///            A 64-bit integer to initialize the state. This number must be
-///            non-zero.
-
-SplitMix64::SplitMix64(uint64_t state_):
-    state(state_)
-{
-    // Initial state must not be zero.
-    assert(state_ != 0);
 }
 
 

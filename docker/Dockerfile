@@ -1,28 +1,43 @@
-# SPDX-FileCopyrightText: Copyright 2021, Siavash Ameli <sameli@berkeley.edu>
+# SPDX-FileCopyrightText: Copyright 2022, Siavash Ameli <sameli@berkeley.edu>
 # SPDX-License-Identifier: BSD-3-Clause
 # SPDX-FileType: SOURCE
 
 # -----------------------------------------------------------------------------
 # How to build
-#   $ docker build -t sameli/imate -f <This-Filename> .
+#
+#   $ cd ..  # go to root dir of package (it must run from the parent dir)
+#   $ docker build . -t sameli/imate -f docker/Dockerfile
+#
+# If you run `docker build` multiple times to fix issues, it is better to add
+# `--no-cache` option, so that in each run it starts from fresh:
+#
+#   $ docker build . --no-cache -t sameli/imate -f docker/Dockerfile
 #
 # How to run:
+#
 #   $ docker run -it -v/host_dir:/image_dir imate
+#
+# Notes:
+#
+# The `ADD` command copies the contents of the package to a directory in the
+# comtainer, but it does not copy all files/folders. See `.dockerignore` to
+# see which files are ingored.
 # -----------------------------------------------------------------------------
 
 # -----
 # Build
 # -----
 
-FROM nvidia/cuda:11.4.1-devel-ubuntu20.04 as builder
+FROM nvidia/cuda:12.3.1-devel-ubuntu22.04 as builder
 MAINTAINER Siavash Ameli <samei@berkeley.edu>
-LABEL Description="imate python package with cuda-11 support"
+LABEL Description="imate python package with cuda-12 support"
 
 # Install python3
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         python3-dev \
         python3-pip \
+        python3-venv \
         wget \
         && \
     apt-get clean && \
@@ -30,24 +45,33 @@ RUN apt-get update && \
 
 # Build package wheel
 ENV USE_CUDA=1
+ENV CUDA_DYNAMIC_LOADING=0
 RUN mkdir /tmp/imate
+
+# Note: ADD does not copy all files. See .dockerignore
 ADD . /tmp/imate/
 WORKDIR /tmp/imate
-RUN /usr/bin/python3 setup.py bdist_wheel
+RUN rm -rf build dist
+
+# Note: run setup.py clean to remove in-source cpp build files (if there are any)
+RUN /usr/bin/python3 setup.py clean
+RUN /usr/bin/python3 -m pip install --upgrade pip
+RUN /usr/bin/python3 -m pip install build
+RUN /usr/bin/python3 -m build --wheel --outdir dist
 
 # -------
 # Runtime
 # -------
 
-FROM nvidia/cuda:11.4.1-base-ubuntu20.04
+FROM nvidia/cuda:12.3.1-base-ubuntu22.04
 
-# Install python3 and libcudablas, libcusparse, since they are not in the NVIDA
+# Install python3 and libcudablas, libcusparse, since they are not in the NVIDIA
 # cuda's "base" image.
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends \
-        libcublas-11-4 \
-        libcusparse-11-4 \
+        libcublas-12-3 \
+        libcusparse-12-3 \
         python3-pip \
         libgomp1 \
         libsuitesparse-dev \

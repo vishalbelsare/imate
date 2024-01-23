@@ -1,66 +1,226 @@
 name: deploy-conda
 
 on:
-    # push:
-    #     branches:
-    #         - main
+    push:
+        branches:
+            - main
     release:
-        types: 
+        types:
             - published
 
 jobs:
-    build_upload_conda:
-        runs-on: ubuntu-latest
+    build_wheels:
+        name: Build wheels, ${{ matrix.os }}, ${{ matrix.python-version }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, windows-latest, macos-latest]
+                python-version: ['cp39', 'cp310', 'cp311', 'cp312']
         steps:
             - name: Checkout
-              uses: actions/checkout@v2
+              uses: actions/checkout@v4
+            
+            - name: Setup Python 
+              uses: actions/setup-python@v4
+              with:
+                python-version: '3.12'
 
-            - name: Install conda, conda-build, and conda-client
+            - name: Install OpenMP for mac
+              if: runner.os == 'macos'
               run: |
-                  wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-                  bash miniconda.sh -b -p $HOME/miniconda
-                  export PATH="$HOME/miniconda/bin:$PATH"
-                  hash -r
-                  conda config --set always_yes yes --set changeps1 no
-                  conda update -q conda
-                  conda install conda-build
-                  conda install anaconda-client
+                  # Starting from libomp>=15.0, the libomp installation in homebrew is "keg-only",
+                  # meaning that libomp is only installed in homebrew's directory, but not moved
+                  # to /usr/local to avoid other OpenMP installations (such as with gcc's version
+                  # of OpenMP). To use the homebrew's version of OpenMP,the following symbolic
+                  # links are created. Without these, the installation will fail with the error
+                  # of "fatal error: omp.h file found"
+                  brew install libomp
+                  libomp_dir=$(brew --prefix libomp)
+                  ln -sf ${libomp_dir}/include/omp-tools.h  /usr/local/include/omp-tools.h
+                  ln -sf ${libomp_dir}/include/omp.h        /usr/local/include/omp.h
+                  ln -sf ${libomp_dir}/include/ompt.h       /usr/local/include/ompt.h
+                  ln -sf ${libomp_dir}/lib/libomp.a         /usr/local/lib/libomp.a
+                  ln -sf ${libomp_dir}/lib/libomp.dylib     /usr/local/lib/libomp.dylib
 
-            - name: Build package
+              # Without this, installing cuda give error: no much space left on device
+            - name: Clear Cache
+              if: matrix.os != 'windows-latest'
+              run: rm -rf /opt/hostedtoolcache 
+
+            # To install CUDA in windows, uncomment the following lines. Note
+            # that the Jimver@cuda-toolkit action (below) can only install cuda
+            # on linux and windows, but not macos. Also, for linux, we should
+            # not install cuda here, rather it should be installed inside the
+            # manylinux docker image. Thus, the following Jimver action can
+            # only apply to windows, not linux and macos. To install cuda in
+            # linux, see the second next actions below "Build wheel with cuda
+            # support".
+            - name: Install CUDA
+              if: matrix.os == 'windows-latest'
+              uses: Jimver/cuda-toolkit@v0.2.11
+              id: cuda-toolkit
+              with:
+                  cuda: '12.1.0'
+
+            # Build wheel for windows with CUDA enabled. Note that cibuildwheel
+            # does not need manylinux docker, thuns, CUDA can be installed in
+            # the github action's virtual machine using the Jimver's action
+            # in the previous action (see above).
+            - name: Build wheels in windows with CUDA (X86_64) Python ${{ matrix.python-version }}
+              if: matrix.os == 'windows-latest'
+              uses: pypa/cibuildwheel@v2.15.0
+              env:
+                  CIBW_ARCHS_WINDOWS: "AMD64 x86"
+                  CIBW_BUILD: "${{ matrix.python-version }}-win_amd64"
+                  CIBW_SKIP: "pp* cp36-* cp37-* cp38-*"
+                  CIBW_BUILD_VERBOSITY: 3
+                  CIBW_ENVIRONMENT: "USE_LONG_INT=0 USE_UNSIGNED_LONG_INT=0 USE_CBLAS=0 USE_CUDA=1 CUDA_DYNAMIC_LOADING=1"
+                  CIBW_BEFORE_BUILD_WINDOWS: "pip install delvewheel"
+                  CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: "delvewheel repair -w {dest_dir} {wheel}"
+              with:
+                output-dir: wheelhouse
+           
+            # Do not enable compiling with CUDA for macos since NIVDIA no longer supports CUDA in the macos.
+            # Build wheel for macos X86_64.
+            # Note that wheels for macos ARM64 will be built on cirrus ci (see /tools/ci)
+            - name: Build wheels in mac without CUDA (X86_64) Python ${{ matrix.python-version }}
+              if: matrix.os == 'macos-latest'
+              uses: pypa/cibuildwheel@v2.15.0
+              env:
+                  CIBW_ARCHS_MACOS: "x86_64"
+                  CIBW_BUILD: "${{ matrix.python-version }}-macosx_x86_64"
+                  CIBW_SKIP: "pp* cp36-* cp37-* cp38-*"
+                  CIBW_BUILD_VERBOSITY: 3
+                  CIBW_ENVIRONMENT: "USE_LONG_INT=0 USE_UNSIGNED_LONG_INT=0 USE_CBLAS=0 USE_CUDA=0"
+              with:
+                output-dir: wheelhouse
+
+            # Enable compiling with CUDA, only for linux. Note that cuda must
+            # be installed "inside" the manylinux docker image, not in the main
+            # github virtual machine. Also, we should use manylinux2014, but
+            # not manylinux1. Because of this, we will not install CUDA with
+            # the Jimver's action (unlike we did so for the windows wheel in
+            # the above). The ``CUDA_DYNAMIC_LOADING=1`` enables dynamic
+            # loading of CUDA library. Base of this, when the wheels are
+            # created in manylinux platform, the cuda's libraries
+            # (libcudart.so, libcublas.so, libcusparse.so) will bundle to
+            # the wheel. This is increases the wheel size, bit since the
+            # anaconda cloud upload size is 1GB, the large wheel size will not
+            # be a problem. The advantage of bundling cuda libraries to the
+            # wheel is that the end-user does not have to install cuda toolkit.
+            # Note that wheels for linux AARCH64 will be built on cirrus ci (see /tools/ci)
+            - name: Build wheels in linux with CUDA (X86_64) Python ${{ matrix.python-version }}
+              if: matrix.os == 'ubuntu-latest'
+              uses: pypa/cibuildwheel@v2.15.0
+              env:
+                  CIBW_MANYLINUX_X86_64_IMAGE: sameli/manylinux2014_x86_64_cuda_12.3
+                  # CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
+                  # CIBW_BEFORE_ALL_LINUX: chmod +x .github/scripts/install_cuda.sh && .github/scripts/install_cuda.sh
+                  CIBW_ARCHS_LINUX: "x86_64"
+                  CIBW_BUILD: "${{ matrix.python-version }}-manylinux_x86_64"
+                  CIBW_SKIP: "pp* cp36-* cp37-* cp38-*"
+                  CIBW_BUILD_VERBOSITY: 1
+                  CIBW_ENVIRONMENT: "USE_LONG_INT=0 USE_UNSIGNED_LONG_INT=0 USE_CBLAS=0 USE_CUDA=1 CUDA_DYNAMIC_LOADING=1 CUDA_HOME=/usr/local/cuda"
+              with:
+                output-dir: wheelhouse
+
+            # Upload all wheels to an artifact
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: artifacts-wheel-${{ matrix.os }}-${{ matrix.python-version }}
+                  path: ./wheelhouse/*.whl
+                  retention-days: 1
+
+    build_conda:
+        needs: [build_wheels]
+        name: Build conda on ${{ matrix.os }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, windows-latest, macos-latest]
+        
+        # To upload to PyPI on every tag starting with 'v', use the following:
+        # if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v')
+        # To publish to pypi on each GitHub Release, use the following:
+        # if: github.event_name == 'release' && github.event.action == 'published'
+        steps:
+
+            - name: Clean runner space
+              if: matrix.os == 'ubuntu-latest'
               run: |
-                  export PATH="$HOME/miniconda/bin:$PATH"
-                  conda-build --output-folder . .
+                  sudo rm -rf /usr/share/dotnet
+                  sudo rm -rf /opt/ghc
+                  sudo rm -rf "/usr/local/share/boost"
+                  sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+                  docker system prune -af
+
+            - name: Checkout
+              uses: actions/checkout@v3
+
+            - name: Download artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  pattern: artifacts-*
+                  merge-multiple: true
+                  path: dist
+
+            - name: Setup Miniconda
+              uses: conda-incubator/setup-miniconda@v2
+              with:
+                  miniconda-version: "latest"
+                  auto-update-conda: true
+
+            - name: Install OpenMP for mac
+              if: matrix.os == 'macos-latest'
+              run: |
+                  brew install libomp
+
+                  # Starting from libomp>=15.0, the libomp installation in homebrew is "keg-only",
+                  # meaning that libomp is only installed in homebrew's directory, but not moved
+                  # to /usr/local to avoid other OpenMP installations (such as with gcc's version
+                  # of OpenMP). To use the homebrew's version of OpenMP,the following symbolic
+                  # links are created. Without these, the installation will fail with the error
+                  # of "fatal error: omp.h file found"
+                  ln -s /usr/local/opt/libomp/include/omp-tools.h /usr/local/include/omp-tools.h
+                  ln -s /usr/local/opt/libomp/include/omp.h /usr/local/include/omp.h
+                  ln -s /usr/local/opt/libomp/include/ompt.h /usr/local/include/ompt.h
+                  ln -s /usr/local/opt/libomp/lib/libomp.a /usr/local/lib/libomp.a
+                  ln -s /usr/local/opt/libomp/lib/libomp.dylib /usr/local/lib/libomp.dylib
+
+            - name: Build and upload package
+              shell: bash -el {0}
+              run: |
+                  conda install -y conda-build anaconda-client
+                  conda config --set anaconda_upload yes
+                  export PATH=$(conda info --root):$PATH
+                  export PATH=$(conda info --root)/bin:$PATH
+                  conda build --output-folder conda-bld .
               env:
                   CYTHON_BUILD_IN_SOURCE: '1'  # see setup.py. Avoids a bug when building with multiple python variants
-
-            - name: Convert linux builds to mac and windows
-              run: |
-                  export PATH="$HOME/miniconda/bin:$PATH"
-                  conda convert -f -p linux-aarch64 linux-64/*.tar.bz2
-                  conda convert -f -p osx-64 linux-64/*.tar.bz2
-                  conda convert -f -p win-64 linux-64/*.tar.bz2
-                  conda convert -f -p win-32 linux-64/*.tar.bz2
-
-            - name: Upload to Anaconda Cloud
-              run: |
-                  export PATH="$HOME/miniconda/bin:$PATH"
-                  anaconda upload --force --label main linux-64/*.tar.bz2
-                  anaconda upload --force --label main linux-aarch64/*.tar.bz2
-                  anaconda upload --force --label main osx-64/*.tar.bz2
-                  anaconda upload --force --label main win-64/*.tar.bz2
-                  anaconda upload --force --label main win-32/*.tar.bz2
-              env:
                   ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
+                 
+            # The manylinux wheels (after repaired with auditwheel) are very
+            # large in size. It is better to delete them. If we do not delete
+            # them, however, they will be deleted after the retention days,
+            # which I set to one day.
+            - name: Delete artifacts
+              uses: geekyeggo/delete-artifact@v4
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  name: artifacts-*
 
     test_conda:
-        needs: [build_upload_conda]
+        needs: [build_conda]
         name: Test on ${{ matrix.os }} and Python ${{ matrix.python-version }}
         runs-on: ${{ matrix.os }}
         strategy:
             fail-fast: false
             matrix:
                 os: [ubuntu-latest, windows-latest, macos-latest]
-                python-version: [2.7, 3.6, 3.7, 3.8, 3.9]
+                python-version: ['3.9', '3.10', '3.11', '3.12']
 
         steps:
             - name: Setup Miniconda
@@ -70,61 +230,17 @@ jobs:
                   python-version: ${{ matrix.python-version }}
                   activate-environment: myenv
 
-        # steps:
-        #     - name: Download conda in Linux
-        #       if: runner.os == 'linux'
-        #       run: wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-        #
-        #     - name: Download conda in macOS
-        #       if: runner.os == 'macos'
-        #       run: curl https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o miniconda.sh
-
-            # - name: Download conda in Windows
-            #   if: runner.os == 'Windows'
-            #   run: |
-            #       python -m pip install wget
-            #       wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe -O miniconda.sh
-
-            # - name: Install conda
-            #   run: |
-            #       sh miniconda.sh -b -p $HOME/miniconda
-            #       export PATH="$HOME/miniconda/bin:$PATH"
-            #       hash -r
-            #       conda config --set always_yes yes --set changeps1 no
-            #       conda update -q conda
-
-            # - name: Test (in Unix)
-            #   if: runner.os != 'Windows'
-            #   run: |
-            #       mv imate imate-DoNotImport
-            #       export PATH="$HOME/miniconda/bin:$PATH"
-            #       source $(conda info --root)/etc/profile.d/conda.sh
-            #       
-            #       PythonVersions="2.7 3.6 3.7 3.8 3.9"
-            #       for PythonVersion in $PythonVersions
-            #       do
-            #           conda create --name env-${PythonVersion} -c s-ameli python=${PythonVersion} imate pytest-cov -y
-            #           conda activate env-${PythonVersion}
-            #           pytest
-            #           conda deactivate
-            #           conda remove --name env-${PythonVersion} --all -y
-            #       done
-
-            - name: Install Visual C++ for Python 2.7
-              if: |
-                  runner.os == 'Windows' &&
-                  matrix.python-version == '2.7'
-              run: choco install vcpython27 -f -y
-
-            # - name: Install package
-              # run: |
-                  # conda config --set channel_priority strict
-                  # conda install -c conda-forge pytest pytest-cov -y
-                  # conda install -c conda-forge -c s-ameli imate -y
-                  # conda init
-
             - name: Checkout
-              uses: actions/checkout@v2
+              uses: actions/checkout@v3
+
+            # Remove MKL as it causes error in initializing libomp. This only happens in MacOS and
+            # the conda (but not pip) installation of this package.
+            - name: Remove MKL in MacOS
+              if: matrix.os == 'macos-latest'
+              shell: bash -l {0}
+              run: |
+                  conda install nomkl
+                  conda remove mkl mkl-service || true  # use true since if mkl or mkl-service does not exist, conda throw error and fails the whole runner action to continue
 
             - name: Test
               shell: bash -l {0}
@@ -134,24 +250,3 @@ jobs:
                   conda install -c s-ameli imate -y
                   conda install pytest -y
                   pytest
-
-            # - name: Test (in Windows)
-            #   if: runner.os == 'Windows'
-            #   run: |
-            #       mkdir ~\tmp
-            #       Copy-Item -Path tests -Destination ~\tmp -Recurse
-            #       Copy-Item -Path examples -Destination ~\tmp -Recurse
-            #       cd ~\tmp
-            #       choco install vcpython27 -f -y
-            #       $RootDir=$(conda info --root)
-            #       . $RootDir\etc\profile.d\conda.sh
-            #       $PythonVersions="2.7","3.6","3.7","3.8","3.9"
-            #       foreach ($PythonVersion in $PythonVersions)
-            #       {
-            #           conda create --name env-$PythonVersion -c s-ameli python=$PythonVersion pytest-cov -y
-            #           conda activate env-$PythonVersion
-            #           conda install -c s-ameli imate -y
-            #           pytest-cov
-            #           conda deactivate
-            #           conda remove --name env-$PythonVersion --all -y
-            #       }

@@ -17,8 +17,12 @@ import sys
 import time
 import numpy
 import scipy.sparse
-from imate.sample_matrices import band_matrix, band_matrix_logdet
+from imate.sample_matrices import toeplitz, toeplitz_logdet
 from imate import logdet
+
+import warnings
+warnings.resetwarnings()
+warnings.filterwarnings("error")
 
 
 # ==============
@@ -46,7 +50,7 @@ def relative_error(estimate, exact):
 # test logdet methods
 # ===================
 
-def _test_logdet_methods(K, matrix, gram, exponent, assume_matrix):
+def _test_logdet_methods(K, matrix, gram, p, assume_matrix):
     """
     Computes the log-determinant of matrix ``K`` with multiple method.
 
@@ -68,30 +72,29 @@ def _test_logdet_methods(K, matrix, gram, exponent, assume_matrix):
     else:
         logdet0 = numpy.real(numpy.log(
             numpy.linalg.det(K).astype(numpy.complex128)))
-    logdet0 *= exponent
+    logdet0 *= p
     if gram:
         logdet0 = 2.0 * logdet0
     time01 = time.time()
 
     # Use eigenvalue method
     time10 = time.time()
-    logdet1, _ = logdet(K, method='eigenvalue', gram=gram,
-                        assume_matrix=assume_matrix, exponent=exponent,
-                        non_zero_eig_fraction=0.95)
+    logdet1 = logdet(K, method='eigenvalue', gram=gram,
+                     assume_matrix=assume_matrix, p=p,
+                     non_zero_eig_fraction=0.95)
     time11 = time.time()
 
     # Use Cholesky method
     time20 = time.time()
-    logdet2, _ = logdet(K, method='cholesky', gram=gram, exponent=exponent,
-                        cholmod=None)
+    logdet2 = logdet(K, method='cholesky', gram=gram, p=p, cholmod=None)
     time21 = time.time()
 
     # Use Stochastic Lanczos Quadrature method
     time30 = time.time()
-    logdet3, _ = logdet(K, method='slq', min_num_samples=min_num_samples,
-                        max_num_samples=max_num_samples, orthogonalize=-1,
-                        lanczos_degree=lanczos_degree, error_rtol=error_rtol,
-                        gram=gram, exponent=exponent, verbose=False)
+    logdet3 = logdet(K, method='slq', min_num_samples=min_num_samples,
+                     max_num_samples=max_num_samples, orthogonalize=-1,
+                     seed=-1, lanczos_degree=lanczos_degree,
+                     error_rtol=error_rtol, gram=gram, p=p, verbose=False)
     time31 = time.time()
 
     # Elapsed times
@@ -101,9 +104,9 @@ def _test_logdet_methods(K, matrix, gram, exponent, assume_matrix):
     elapsed_time3 = time31 - time30
 
     # Exact solution of logdet for band matrix
-    if exponent == 1:
-        logdet_exact = band_matrix_logdet(matrix['a'], matrix['b'],
-                                          matrix['size'], gram)
+    if p == 1:
+        logdet_exact = toeplitz_logdet(matrix['a'], matrix['b'],
+                                       matrix['size'], gram)
         if not gram:
             logdet_exact = 2.0 * logdet_exact
     else:
@@ -162,31 +165,30 @@ def test_logdet():
 
             # When gram is True:
             #     1. We generate a 2-band nonsymmetric matrix K (hence we set
-            #        gram=False in band_matrix).
+            #        gram=False in toeplitz).
             #     2. We compute logdet of K.T @ K using only K (hence we set
             #        gram=True in logdet method).
             #
             # When gram is False:
             #     1. We generate a 3-band symmetric matrix K (hence we set
-            #        gram=True in band_matrix).
+            #        gram=True in toeplitz).
             #     2. We compute logdet of K using K (hence we set
             #        gram=False in logdet method).
-            K = band_matrix(matrix['a'], matrix['b'], matrix['size'],
-                            gram=(not gram), dtype=dtype)
+            K = toeplitz(matrix['a'], matrix['b'], matrix['size'],
+                         gram=(not gram), dtype=dtype)
 
             for sparse in sparses:
                 if not sparse:
                     K = K.toarray()
 
-                for exponent in exponents:
+                for p in exponents:
                     print('dtype: %s, ' % (dtype) +
                           'sparse: %5s, ' % (sparse) +
                           'gram: %5s, ' % (gram) +
-                          'exponent: %0.4f,\n' % (exponent) +
+                          'exponent: %0.4f,\n' % (p) +
                           'assume_matrix: %s.' % (assume_matrix))
 
-                    _test_logdet_methods(K, matrix, gram, exponent,
-                                         assume_matrix)
+                    _test_logdet_methods(K, matrix, gram, p, assume_matrix)
 
 
 # ===========

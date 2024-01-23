@@ -48,15 +48,15 @@ def _check_import():
                            'package. Importing the package will fail. To ' +
                            'resolve this issue, consider changing the ' +
                            'current directory outside of the directory of ' +
-                           'the source-code of this package. Your current' +
+                           'the source-code of this package. Your current ' +
                            'directory is: %s.' % _user_current_dir)
 
-    elif (_executable_dir == _project_dir):
+    if (_executable_dir == _project_dir):
         raise RuntimeError('You are running a script in the source-code ' +
                            'directory of this package. Importing the ' +
                            'package will fail. To resolve this issue, ' +
-                           'consider changing the script directory outside' +
-                           'of the directory of the source-code of this' +
+                           'consider changing the script directory outside ' +
+                           'of the directory of the source-code of this ' +
                            'package. Your current directory is: %s.'
                            % _executable_dir)
 
@@ -70,10 +70,18 @@ try:
     from .logdet import logdet                                     # noqa: E402
     from .trace import trace                                       # noqa: E402
     from .traceinv import traceinv                                 # noqa: E402
+    from .trexp import trexp                                       # noqa: E402
+    from .trlinfrac import trlinfrac                               # noqa: E402
+    from .eigencount import eigencount                             # noqa: E402
+    from .density import density                                   # noqa: E402
+    from .schatten import schatten                                 # npqa: E402
     from .linear_operator import Matrix, AffineMatrixFunction      # noqa: E402
-    from .interpolate_traceinv import InterpolateTraceinv          # noqa: E402
+    from .interpolator import InterpolateSchatten                  # noqa: E402
+    from .interpolator import InterpolateLogdet                    # noqa: E402
+    from .interpolator import InterpolateTrace                     # noqa: E402
     from .sample_matrices import correlation_matrix                # noqa: E402
-    from .sample_matrices import band_matrix                       # noqa: E402
+    from .sample_matrices import toeplitz                          # noqa: E402
+    from .device import Timer, Memory, info
 
 except Exception as e:
     # Before printing the exception, check if the exception is raised due to
@@ -85,13 +93,23 @@ except Exception as e:
     raise e
 
 __all__ = [
+        'logdet',
         'trace',
         'traceinv',
-        'logdet',
+        'trexp',
+        'trlinfrac',
+        'eigencount',
+        'density',
+        'schatten',
+        'InterpolateLogdet',
+        'InterpolateTrace',
+        'InterpolateSchatten',
         'Matrix',
         'AffineMatrixFunction',
-        'InterpolateTraceinv',
         'correlation_matrix',
-        'band_matrix']
+        'toeplitz',
+        'Timer',
+        'Memory',
+        'info']
 
-from.__version__ import __version__                                # noqa: F401
+from .__version__ import __version__                          # noqa: F401 E402

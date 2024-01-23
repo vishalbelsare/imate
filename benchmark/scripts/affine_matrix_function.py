@@ -1,10 +1,17 @@
 #! /usr/bin/env python
 
+# SPDX-FileCopyrightText: Copyright 2021, Siavash Ameli <sameli@berkeley.edu>
+# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-FileType: SOURCE
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the license found in the LICENSE.txt file in the root directory
+# of this source tree.
+
 # =======
 # Imports
 # =======
 
-import os
 from os.path import join
 import sys
 import pickle
@@ -12,13 +19,10 @@ import getopt
 import numpy
 import scipy
 import scipy.sparse
+import imate
 from imate import traceinv, logdet
 from imate import AffineMatrixFunction                             # noqa: F401
-from imate.sample_matrices import band_matrix
-import subprocess
-import multiprocessing
-import platform
-import re
+from imate.sample_matrices import toeplitz
 from time import process_time
 from datetime import datetime
 
@@ -78,36 +82,6 @@ Required arguments:
     return arguments
 
 
-# ==================
-# get processor name
-# ==================
-
-def get_processor_name():
-    """
-    Gets the name of CPU.
-
-    For windows operating system, this function still does not get the full
-    brand name of the cpu.
-    """
-
-    if platform.system() == "Windows":
-        return platform.processor()
-
-    elif platform.system() == "Darwin":
-        os.environ['PATH'] = os.environ['PATH'] + os.pathsep + '/usr/sbin'
-        command = "sysctl -n machdep.cpu.brand_string"
-        return subprocess.getoutput(command).strip()
-
-    elif platform.system() == "Linux":
-        command = "cat /proc/cpuinfo"
-        all_info = subprocess.getoutput(command).strip()
-        for line in all_info.split("\n"):
-            if "model name" in line:
-                return re.sub(".*model name.*:", "", line, 1)[1:]
-
-    return ""
-
-
 # =========
 # benchmark
 # =========
@@ -150,14 +124,14 @@ def benchmark(argv):
     }
 
     devices = {
-        'cpu_name': get_processor_name(),
-        'num_all_cpu_threads': multiprocessing.cpu_count(),
+        'cpu_name': imate.device.get_processor_name(),
+        'num_all_cpu_threads': imate.device.get_num_cpu_threads(),
     }
 
     # Generate matrix
-    M = band_matrix(matrix['band_alpha'], matrix['band_beta'], matrix['size'],
-                    gram=matrix['gram'], format=matrix['format'],
-                    dtype=matrix['dtype'])
+    M = toeplitz(matrix['band_alpha'], matrix['band_beta'], matrix['size'],
+                 gram=matrix['gram'], format=matrix['format'],
+                 dtype=matrix['dtype'])
 
     Mop = AffineMatrixFunction(M)
 
@@ -171,10 +145,11 @@ def benchmark(argv):
     print('SLQ method ...', end='')
     trace, info = function(
             Mop,
-            parameters=matrix['t'],
-            method='slq',
-            exponent=config['exponent'],
             gram=config['gram'],
+            p=config['exponent'],
+            return_info=True,
+            method='slq',
+            parameters=matrix['t'],
             min_num_samples=config['min_num_samples'],
             max_num_samples=config['max_num_samples'],
             error_rtol=config['error_rtol'],
@@ -210,21 +185,23 @@ def benchmark(argv):
             M_ = M
         Mt = M_ + matrix['t'][i] * Identity
         if arguments['function'] == 'traceinv':
-            trace_exact[i], _ = function(
+            trace_exact[i] = function(
                     Mt.tocsr(),
-                    method='cholesky',
-                    exponent=config['exponent'],
-                    cholmod=None,
                     gram=False,
+                    p=config['exponent'],
+                    return_info=False,
+                    method='cholesky',
+                    cholmod=None,
                     invert_cholesky=config['invert_cholesky'])
 
         elif arguments['function'] == 'logdet':
-            trace_exact[i], _ = function(
+            trace_exact[i] = function(
                     Mt.tocsr(),
+                    gram=False,
+                    p=config['exponent'],
+                    return_info=False,
                     method='cholesky',
-                    exponent=config['exponent'],
-                    cholmod=None,
-                    gram=False)
+                    cholmod=None)
 
         print(' done.')
 

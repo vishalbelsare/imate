@@ -25,6 +25,7 @@ def check_arguments(
         C,
         gram,
         exponent,
+        return_info,
         assume_matrix,
         min_num_samples,
         max_num_samples,
@@ -34,6 +35,7 @@ def check_arguments(
         outlier_significance_level,
         solver_tol,
         orthogonalize,
+        seed,
         num_threads,
         verbose,
         plot):
@@ -45,8 +47,12 @@ def check_arguments(
     if (not isinstance(A, numpy.ndarray)) and (not isspmatrix(A)):
         raise TypeError('Input matrix should be either a "numpy.ndarray" or ' +
                         'a "scipy.sparse" matrix.')
-    elif A.shape[0] != A.shape[1]:
-        raise ValueError('Input matrix should be a square matrix.')
+
+    # Check if the matrix is square or not
+    if (A.shape[0] != A.shape[1]):
+        square = False
+    else:
+        square = True
 
     # Check B
     if B is not None:
@@ -59,9 +65,12 @@ def check_arguments(
             raise TypeError('When the input matrix "A" is of type ' +
                             '"scipy.sparse", matrix "B" should also be of ' +
                             'the same type.')
-        elif A.shape != B.shape:
+        elif square and (A.shape != B.shape):
             raise ValueError('Matrix "B" should have the same size as ' +
                              'matrix "A".')
+        elif (not square) and (A.shape[1] != B.shape[0]):
+            raise ValueError('Matrix "B" should have the same number of ' +
+                             'rows as the number of columns of "A".')
 
     # Check C
     if C is not None:
@@ -76,9 +85,12 @@ def check_arguments(
             raise TypeError('When the input matrix "A" is of type ' +
                             '"scipy.sparse", matrix "C" should also be of ' +
                             'the same type.')
-        elif A.shape != C.shape:
+        elif square and (A.shape != C.shape):
             raise ValueError('Matrix "C" should have the same size as ' +
                              'matrix "A".')
+        elif (not square) and (A.shape[1] != C.shape[0]):
+            raise ValueError('Matrix "C" should have the same number of ' +
+                             'rows as the number of columns of "A".')
 
     # Check gram
     if gram is None:
@@ -95,6 +107,10 @@ def check_arguments(
         raise TypeError('"exponent" should be a scalar value.')
     elif not isinstance(exponent, (int, numpy.integer)):
         TypeError('"exponent" cannot be an integer.')
+
+    # Check return info
+    if not isinstance(return_info, bool):
+        raise TypeError('"return_info" should be boolean.')
 
     # Check assume_matrix
     if assume_matrix is None:
@@ -195,6 +211,12 @@ def check_arguments(
     elif not isinstance(orthogonalize, bool):
         raise TypeError('"orthogonalize" should be boolean.')
 
+    # Check seed
+    if (seed is not None) and (not numpy.isscalar(seed)):
+        raise TypeError('"seed" should be a None or a scalar value.')
+    elif (seed is not None) and not isinstance(seed, (int, numpy.integer)):
+        raise TypeError('"seed" should be None or an integer.')
+
     # Check num_threads
     if num_threads is None:
         raise TypeError('"num_threads" cannot be None.')
@@ -221,18 +243,7 @@ def check_arguments(
     elif not isinstance(plot, bool):
         raise TypeError('"plot" should be boolean.')
 
-    # Check if plot modules exist
-    if plot is True:
-        try:
-            from .._utilities.plot_utilities import matplotlib      # noqa F401
-            from .._utilities.plot_utilities import load_plot_settings
-            load_plot_settings()
-        except ImportError:
-            raise ImportError('Cannot import modules for plotting. Either ' +
-                              'install "matplotlib" and "seaborn" packages, ' +
-                              'or set "plot=False".')
-
-    return error_atol, error_rtol
+    return error_atol, error_rtol, square
 
 
 # =============

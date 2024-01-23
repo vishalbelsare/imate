@@ -40,57 +40,268 @@ from .._linear_algebra import sparse_cholesky
 
 def cholesky_method(
         A,
-        B=None,
         gram=False,
-        exponent=1,
+        p=1,
+        return_info=False,
+        B=None,
         invert_cholesky=True,
         cholmod=None):
     """
-    Computes trace of inverse of matrix using Cholesky factorization by
+    Trace of inverse of non-singular matrix using Cholesky method.
+
+    Given the matrices :math:`\\mathbf{A}` and :math:`\\mathbf{B}` and the
+    integer exponent :math:`p`, the following is computed:
 
     .. math::
 
-        \\mathrm{trace}(\\mathbf{A}^{-1}) = \\| \\mathbf{L}^{-1} \\|_F^2
+        \\mathrm{trace} \\left(\\mathbf{A}^{-p} \\mathbf{B} \\right).
 
-    where :math:`\\mathbf{L}` is the Cholesky factorization of
-    :math:`\\mathbf{A}` and :math:`\\| \\cdot \\|_F` is the Frobenius norm.
+    If ``B`` is `None`, it is assumed that :math:`\\mathbf{B}` is the identity
+    matrix.
 
-    .. note::
+    If ``gram`` is `True`, then :math:`\\mathbf{A}` in the above is replaced by
+    the Gramian matrix :math:`\\mathbf{A}^{\\intercal} \\mathbf{A}`, and the
+    following is instead computed:
 
-        This function does not produce correct results when ``'A'`` is sparse.
-        It seems ``sksparse.cholmod`` has a problem.
+    .. math::
 
-        When :math:`\\mathbf{A} = \\mathbf{K}` for some positive-definite
-        matrix :math:`\\mathbf{K}`, it produces correct result. However, when
-        :math:`\\mathbf{A} = \\mathbf{K} + \\eta \\mathbf{I}``, its result is
-        different than Hurtchinson and Lanczos stochastic quadrature methods.
-        Also its result becomes correct when :math:`\\mathbf{A}` is converted
-        to dense matrix, and if we do not use ``skspase.cholmod``.
+        \\mathrm{trace} \\left((\\mathbf{A}^{\\intercal}\\mathbf{A})^{-p}
+        \\mathbf{B} \\right).
 
-    :param A: Invertible matrix
-    :type A: numpy.ndarray
+    Parameters
+    ----------
 
-    :param exponent: Exponent :math:`p` in :math:`\\mathbf{A}^{p}`.
-    :param exponent: int
+    A : numpy.ndarray, scipy.sparse
+        A positive-definite sparse or dense matrix. If ``gram`` is `True`, the
+        matrix can be non-square.
 
-    :param invert_cholesky: Flag to invert Cholesky matrix.
-        If ``false``, the inverse of Cholesky is not directly computed, but a
-        linear system is solved for each column of the inverse of the Cholesky.
-    :type invert_cholesky: bool
+        .. warning::
 
-    :param cholmod: If set to ``True``, it uses cholmod library from
-        scikit-sparse package to compute the Chlesky decomposition. If set to
-        ``False``, it uses `scipy.sparse.cholesky`` method. If set to ``None``,
-        first, it tries to use cholmod library,  but if cholmod is not
-        available, it uses ``scipy.sparse.cholesky`` method without raising any
-        warning.
+            This function does not pre-check whether the input matrix is
+            positive-definite.
 
-    :return: Trace of matrix ``A``.
-    :rtype: float
+        .. note::
+
+            In the Cholesky method, the matrix cannot be a type of
+            :class:`Matrix` or :class:`imate.AffineMatrixFunction` classes.
+
+    gram : bool, default=False
+        If `True`, the trace of the Gramian matrix,
+        :math:`(\\mathbf{A}^{\\intercal}\\mathbf{A})^{-p}`, is computed. The
+        Gramian matrix itself is not directly computed. If `False`, the
+        trace of :math:`\\mathbf{A}^{-p}` is computed.
+
+    p : float, default=1.0
+        The integer exponent :math:`p` in :math:`\\mathbf{A}^p`.
+
+    return_info : bool, default=False
+        If `True`, this function also returns a dictionary containing
+        information about the inner computation, such as process time,
+        algorithm settings, etc.
+
+    B : numpy.ndarray, scipy.sparse
+        A positive-definite sparse or dense matrix. `B` should be the same
+        size and type of `A`. If `B` is `None`, is it assumed that the matrix
+        `B` is identity.
+
+        .. warning::
+
+            This function does not pre-check whether the input matrix is
+            positive-definite.
+
+    invert_cholesky : bool, default=True
+        If `True`, the inverse of Cholesky decomposition is computed. This
+        approach is fast but it is only suitable for small matrices. If set to
+        `False`, it uses the inverse of Cholesky matrix indirectly (see Notes).
+        This approach is suitable for larger matrices but slower.
+
+    cholmod : bool, default=None
+        If set to `True`, it uses the `Cholmod` library from `scikit-sparse`
+        package to compute the Cholesky decomposition. If set to `False`, it
+        uses `scipy.sparse.cholesky` method. If set to `None`, first, it tries
+        to use Cholmod library,  but if Cholmod is not available, then it uses
+        `scipy.sparse.cholesky` method.
+
+    Returns
+    -------
+
+    traceinv : float or numpy.array
+        Trace of inverse of `A`.
+
+    info : dict
+        (Only if ``return_info`` is `True`) A dictionary of information with
+        the following keys.
+
+        * ``matrix``:
+            * ``data_type``: `str`, {`float32`, `float64`, `float128`}. Type of
+              the matrix data.
+            * ``gram``: `bool`, whether the matrix `A` or its Gramian is
+              considered.
+            * ``exponent``: `float`, the exponent `p` in
+              :math:`\\mathbf{A}^{-p}`.
+            * ``size``: `(int, int)`, the size of matrix `A`.
+            * ``sparse``: `bool`, whether the matrix `A` is sparse or dense.
+            * ``nnz``: `int`, if `A` is sparse, the number of non-zero elements
+              of `A`.
+            * ``density``: `float`, if `A` is sparse, the density of `A`, which
+              is the `nnz` divided by size squared.
+            * ``num_inquiries``: `int`, for the `cholesky` method, this is
+              always `1`.
+
+        * ``device``:
+            * ``num_cpu_threads``: `int`, number of CPU threads used in shared
+              memory parallel processing.
+            * ``num_gpu_devices``: `int`, for the `cholesky` method, this is
+              always `0`.
+            * ``num_gpu_multiprocessors``: `int`, for the `cholesky` method,
+              this is always `0`.
+            * ``num_gpu_threads_per_multiprocessor``: `int`, for the `cholesky`
+              method, this is always `0`.
+
+        * ``time``:
+            * ``tot_wall_time``: `float`, total elapsed time of computation.
+            * ``alg_wall_time``: `float`, elapsed time of computation during
+              only the algorithm execution.
+            * ``cpu_proc_time``: `float`, CPU processing time of computation.
+
+        * ``solver``:
+            * `cholmod_used`: `bool`, whether the Cholmod from SparseSuite
+              library was used.
+            * ``version``: `str`, version of imate.
+            * ``method``: 'cholesky'
+
+    See Also
+    --------
+
+    imate.trace
+    imate.logdet
+    imate.schatten
+
+    Notes
+    -----
+
+    **Algorithm:**
+
+    The trace of inverse is computed from the Cholesky decompositions
+    :math:`\\mathbf{A}^{p} = \\mathbf{L}_{\\vert p \\vert}
+    \\mathbf{L}_{\\vert p \\vert}^{\\intercal}` and :math:`\\mathbf{B} =
+    \\mathbf{L}_{\\mathbf{B}} \\mathbf{L}_{\\mathbf{B}}^{\\intercal}` as
+    follows:
+
+    .. math::
+
+        \\mathrm{trace} \\left( \\mathbf{A}^{-p} \\mathbf{B} \\right) =
+        \\Vert \\mathbf{L}_{\\vert p \\vert}^{-1} \\mathbf{L}_{\\mathbf{B}}
+        \\Vert_F^2.
+
+    where :math:`\\Vert \\cdot \\Vert_F` is the Frobenius norm. If
+    ``inverst_cholesky`` is `True`, the inverse
+    :math:`\\mathbf{L}_{\\vert p \\vert}^{-1}` is computed directly. Inverting
+    this matrix directly is only feasible for small matrices.
+
+    For larger matrices, set ``invert_cholesky`` to `False`. This approach
+    is slower than setting ``invert_cholesky`` to `True`, however, it can
+    process larger matrices. In this case,
+    :math:`\\Vert \\mathbf{L}_{\\vert p \\vert}^{-1} \\Vert_F^2`
+    is computed indirectly by
+
+    .. math::
+
+
+        \\Vert \\mathbf{L}_{\\vert p \\vert}^{-1} \\Vert_F^2 =
+        \\sum_{i=1}^n \\Vert \\boldsymbol{x}_i \\Vert^2,
+
+    where :math:`\\boldsymbol{x}_i` is solved by the lower-triangular system
+
+    .. math::
+
+        \\mathbf{L}_{\\vert p \\vert} \\boldsymbol{x}_i = \\boldsymbol{b}_i,
+
+    where :math:`\\boldsymbol{b}_i` is the :math:`i`-th column of
+    :math:`\\mathbf{L}_{\\mathbf{B}}`. If `B` is `None`, then
+    :math:`\\mathbf{B}` is assumed to be the identity and hence,
+    :math:`\\boldsymbol{b}_i = (0, \\dots, 0, 1, 0, \\dots, 0)` is a
+    vector of zeross, except its :math:`i`-th element is `1`.
+
+    **Computational Complexity:**
+
+    The computational complexity of this method is
+    :math:`\\mathcal{O}(\\frac{1}{3}n^3)` for dense matrices and
+    :math:`\\mathcal{O}(\\rho n^2)` for sparse matrices where
+    :math:`n` is the matrix size and :math:`\\rho` is the sparse matrix
+    density.
+
+    **Implementation:**
+
+    This function is essentially a wrapper for the Cholesky function of the
+    `scipy` and `scikit-sparse` packages and is primarily used for testing and
+    comparison (benchmarking) against the randomized methods that are
+    implemented in this package. If ``cholmod`` is set to `True`, this function
+    uses the `Suite Sparse
+    <https://people.engr.tamu.edu/davis/suitesparse.html>`_ package to compute
+    the Cholesky decomposition.
+
+    Examples
+    --------
+
+    Compute the trace of inverse of a sparse positive-definite Toeplitz matrix:
+
+    .. code-block:: python
+
+        >>> # Import packages
+        >>> from imate import toeplitz, traceinv
+
+        >>> # Generate a sample symmetric and positive-definite matrix
+        >>> A = toeplitz(2, 1, size=100, gram=True)
+
+        >>> # Compute with Cholesky method (default method)
+        >>> traceinv(A, method='cholesky')
+        33.22222222222223
+
+    Print information about the inner computation:
+
+    .. code-block:: python
+
+        >>> ti, info = traceinv(A, method='cholesky', return_info=True)
+        >>> print(ti)
+        33.22222222222223
+
+        >>> # Print dictionary neatly using pprint
+        >>> from pprint import pprint
+        >>> pprint(info)
+        {
+            'matrix': {
+                'data_type': b'float64',
+                'density': 0.0298,
+                'exponent': 1,
+                'gram': False,
+                'nnz': 298,
+                'num_inquiries': 1,
+                'size': (100, 100),
+                'sparse': True
+            },
+            'solver': {
+                'cholmod_used': True,
+                'invert_cholesky': True,
+                'method': 'cholesky',
+                'version': '0.16.0'
+            },
+            'device': {
+                'num_cpu_threads': 8,
+                'num_gpu_devices': 0,
+                'num_gpu_multiprocessors': 0,
+                'num_gpu_threads_per_multiprocessor': 0
+            },
+            'time': {
+                'alg_wall_time': 0.031367766903713346,
+                'cpu_proc_time': 0.03275534099998367,
+                'tot_wall_time': 0.031367766903713346
+            }
+        }
     """
 
     # Check input arguments
-    check_arguments(A, B, gram, exponent, invert_cholesky, cholmod)
+    check_arguments(A, B, gram, p, return_info, invert_cholesky, cholmod)
 
     # Determine to use Sparse
     sparse = False
@@ -107,13 +318,13 @@ def cholesky_method(
     init_cpu_proc_time = time.process_time()
 
     # Form A**p (or (AtA)**p), that is the p-th power of A or (A.T * A)
-    if (exponent == 1) or (exponent == -1):
+    if (p == 1) or (p == -1):
         if gram:
             Ap = A.T @ A
         else:
             Ap = A
 
-    elif exponent != 0:
+    elif p != 0:
 
         # Initialize Ap
         if gram:
@@ -124,11 +335,11 @@ def cholesky_method(
             A1 = A
 
         # Directly compute power of A by successive matrix multiplication
-        for i in range(1, numpy.abs(exponent)):
+        for i in range(1, numpy.abs(p)):
             Ap = Ap @ A1
 
     # Compute traceinv
-    if exponent == 0:
+    if p == 0:
         if B is None:
             trace = A.shape[0]
         else:
@@ -138,14 +349,14 @@ def cholesky_method(
                     trace += B[i, i]
             else:
                 trace = numpy.trace(B)
-    elif exponent < 0:
+    elif p < 0:
 
         if B is None:
             C = Ap
         else:
             C = Ap @ B
 
-        # Trace of the inverse of a matrix to the power of a negative exponent
+        # Trace of the inverse of a matrix to the power of a negative p
         if sparse:
             trace = 0.0
             for i in range(C.shape[0]):
@@ -155,7 +366,7 @@ def cholesky_method(
 
     else:
 
-        # Trace of inverse of matrix to the power of a positive exponent
+        # Trace of inverse of matrix to the power of a positive p
         # Cholesky factorization
         if sparse:
 
@@ -214,8 +425,8 @@ def cholesky_method(
         {
             'data_type': get_data_type_name(A),
             'gram': gram,
-            'exponent': exponent,
-            'size': A.shape[0],
+            'exponent': p,
+            'size': A.shape,
             'sparse': isspmatrix(A),
             'nnz': get_nnz(A),
             'density': get_density(A),
@@ -243,14 +454,17 @@ def cholesky_method(
         }
     }
 
-    return trace, info
+    if return_info:
+        return trace, info
+    else:
+        return trace
 
 
 # ===============
 # check arguments
 # ===============
 
-def check_arguments(A, B, gram, exponent, invert_cholesky, cholmod):
+def check_arguments(A, B, gram, p, return_info, invert_cholesky, cholmod):
     """
     Checks the type and value of the parameters.
     """
@@ -259,8 +473,12 @@ def check_arguments(A, B, gram, exponent, invert_cholesky, cholmod):
     if (not isinstance(A, numpy.ndarray)) and (not isspmatrix(A)):
         raise TypeError('Input matrix should be either a "numpy.ndarray" or ' +
                         'a "scipy.sparse" matrix.')
-    elif A.shape[0] != A.shape[1]:
-        raise ValueError('Input matrix should be a square matrix.')
+
+    # Check if the matrix is square or not
+    if (A.shape[0] != A.shape[1]):
+        square = False
+    else:
+        square = True
 
     # Check B
     if B is not None:
@@ -273,9 +491,12 @@ def check_arguments(A, B, gram, exponent, invert_cholesky, cholmod):
             raise TypeError('When the input matrix "A" is of type ' +
                             '"scipy.sparse", matrix "B" should also be of ' +
                             'the same type.')
-        elif A.shape != B.shape:
+        elif square and (A.shape != B.shape):
             raise ValueError('Matrix "B" should have the same size as ' +
                              'matrix "A".')
+        elif (not square) and (A.shape[1] != B.shape[0]):
+            raise ValueError('Matrix "B" should have the same number of ' +
+                             'rows as the number of columns of "A".')
 
     # Check gram
     if gram is None:
@@ -285,13 +506,21 @@ def check_arguments(A, B, gram, exponent, invert_cholesky, cholmod):
     elif not isinstance(gram, bool):
         raise TypeError('"gram" should be boolean.')
 
-    # Check exponent
-    if exponent is None:
-        raise TypeError('"exponent" cannot be None.')
-    elif not numpy.isscalar(exponent):
-        raise TypeError('"exponent" should be a scalar value.')
-    elif not isinstance(exponent, (int, numpy.integer)):
-        TypeError('"exponent" cannot be an integer.')
+    # Check non gram should be square
+    if (not gram) and (not square):
+        raise ValueError('Non Gramian matrix should be square.')
+
+    # Check p
+    if p is None:
+        raise TypeError('"p" cannot be None.')
+    elif not numpy.isscalar(p):
+        raise TypeError('"p" should be a scalar value.')
+    elif not isinstance(p, (int, numpy.integer)):
+        raise TypeError('"p" should be an integer.')
+
+    # Check return info
+    if not isinstance(return_info, bool):
+        raise TypeError('"return_info" should be boolean.')
 
     # Check invert_cholesky
     if not numpy.isscalar(invert_cholesky):

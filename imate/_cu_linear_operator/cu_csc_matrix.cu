@@ -242,7 +242,7 @@ void cuCSCMatrix<DataType>::copy_host_to_device()
 ///
 /// \details If buffer size if not the same as required buffer size, allocate
 ///          (or reallocate) memory. The allocation is always performed in the
-///          fisr call of this function since buffer size is initialized to
+///          first call of this function since buffer size is initialized to
 ///          zero in constructor. But for the next calls it might not be
 ///          reallocated if the buffer size is the same.
 
@@ -307,7 +307,7 @@ void cuCSCMatrix<DataType>::dot(
 
     // Using transpose operation since we treat CSC matrix as CSR
     cusparseOperation_t cusparse_operation = CUSPARSE_OPERATION_TRANSPOSE;
-    cusparseSpMVAlg_t algorithm = CUSPARSE_MV_ALG_DEFAULT;
+    cusparseSpMVAlg_t algorithm = CUSPARSE_SPMV_ALG_DEFAULT;
 
     // Get device id
     int device_id = CudaInterface<DataType>::get_device();
@@ -357,7 +357,7 @@ void cuCSCMatrix<DataType>::dot_plus(
 
     // Using transpose operation since we treat CSC matrix as CSR
     cusparseOperation_t cusparse_operation = CUSPARSE_OPERATION_TRANSPOSE;
-    cusparseSpMVAlg_t algorithm = CUSPARSE_MV_ALG_DEFAULT;
+    cusparseSpMVAlg_t algorithm = CUSPARSE_SPMV_ALG_DEFAULT;
 
     // Get device id
     int device_id = CudaInterface<DataType>::get_device();
@@ -407,7 +407,7 @@ void cuCSCMatrix<DataType>::transpose_dot(
 
     // Using non-transpose operation since we treat CSC matrix as CSR
     cusparseOperation_t cusparse_operation = CUSPARSE_OPERATION_NON_TRANSPOSE;
-    cusparseSpMVAlg_t algorithm = CUSPARSE_MV_ALG_DEFAULT;
+    cusparseSpMVAlg_t algorithm = CUSPARSE_SPMV_ALG_DEFAULT;
 
     // Get device id
     int device_id = CudaInterface<DataType>::get_device();
@@ -457,7 +457,7 @@ void cuCSCMatrix<DataType>::transpose_dot_plus(
 
     // Using non-transpose operation since we treat CSC matrix as CSR
     cusparseOperation_t cusparse_operation = CUSPARSE_OPERATION_NON_TRANSPOSE;
-    cusparseSpMVAlg_t algorithm = CUSPARSE_MV_ALG_DEFAULT;
+    cusparseSpMVAlg_t algorithm = CUSPARSE_SPMV_ALG_DEFAULT;
 
     // Get device id
     int device_id = CudaInterface<DataType>::get_device();

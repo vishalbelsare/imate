@@ -21,7 +21,7 @@ from ..linear_operator import LinearOperator, Matrix
 # get operator
 # ============
 
-def get_operator(A):
+def get_operator(A, gram):
     """
     Check the input operator (or matrix) has proper type and shape. If A is a
     numpy dense matrix or a scipy sparse matrix, it will be converted to an
@@ -33,14 +33,14 @@ def get_operator(A):
         # Check matrix dimension and shape
         if A.ndim != 2:
             raise ValueError('Input matrix should be a 2-dimensional array.')
-        elif A.shape[0] != A.shape[1]:
+        elif (not gram) and (A.shape[0] != A.shape[1]):
             raise ValueError('Input matrix should be a square matrix.')
 
         # Convert matrix A to a linear operator A
         return Matrix(A)
 
     elif isinstance(A, LinearOperator):
-        if A.get_num_rows() != A.get_num_columns():
+        if (not gram) and (A.get_num_rows() != A.get_num_columns()):
             raise ValueError('Input operator should have the same number ' +
                              'of rows and columns.')
 
@@ -117,6 +117,7 @@ def check_arguments(
         lanczos_degree,
         lanczos_tol,
         orthogonalize,
+        seed,
         num_threads,
         num_gpu_devices,
         verbose,
@@ -251,6 +252,12 @@ def check_arguments(
         raise ValueError('"orthogonalize", if positive, should be at most ' +
                          'equal to "lanczos_degree".')
 
+    # Check seed
+    if (seed is not None) and (not numpy.isscalar(seed)):
+        raise TypeError('"seed" should be a None or a scalar value.')
+    elif (seed is not None) and not isinstance(seed, (int, numpy.integer)):
+        raise TypeError('"seed" should be None or an integer.')
+
     # Check num_threads
     if num_threads is None:
         raise TypeError('"num_threads" cannot be None.')
@@ -286,17 +293,6 @@ def check_arguments(
         raise TypeError('"plot" should be a scalar value.')
     elif not isinstance(plot, bool):
         raise TypeError('"plot" should be boolean.')
-
-    # Check if plot modules exist
-    if plot is True:
-        try:
-            from .._utilities.plot_utilities import matplotlib      # noqa F401
-            from .._utilities.plot_utilities import load_plot_settings
-            load_plot_settings()
-        except ImportError:
-            raise ImportError('Cannot import modules for plotting. Either ' +
-                              'install "matplotlib" and "seaborn" packages, ' +
-                              'or set "plot=False".')
 
     # Check gpu
     if gpu is None:
@@ -542,8 +538,8 @@ def print_summary(info):
     print('')
 
     # Prints convergence and error
-    print('             convergence                                 ' +
-          'error     ')
+    print('             convergence                                 error   ' +
+          '             ')
     print('-------------------------------------    ------------------------' +
           '-------------')
     print('min num samples:                %5d' % min_num_samples, end="    ")
@@ -561,7 +557,7 @@ def print_summary(info):
     print('=================================================================' +
           '=============')
     print('                 time                                   device   ' +
-          '               ')
+          '             ')
     print('-------------------------------------    ------------------------' +
           '-------------')
     print('tot wall time (sec):        %8.3e' % tot_wall_time, end="    ")

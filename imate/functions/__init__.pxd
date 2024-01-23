@@ -7,9 +7,10 @@
 # of this source tree.
 
 
-from imate.functions.functions cimport Function, Identity, Inverse, \
-        Logarithm, Exponential, Power, Gaussian, SmoothStep
+from imate.functions.functions cimport Function, Identity, Inverse, Logarithm, \
+    Exponential, Power, Homographic, Indicator, Gaussian, SmoothStep
 from imate.functions.py_functions cimport pyFunction
 
 __all__ = ['Function', 'Identity', 'Inverse', 'Logarithm', 'Exponential',
-           'Power', 'Gaussian', 'SmoothStep', 'pyFunction']
+           'Power', 'Homographic', 'Indicator', 'Gaussian', 'SmoothStep',
+           'pyFunction']

@@ -15,47 +15,85 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                python-version: ['3.6', '3.7', '3.8', '3.9']
+                python-version: ['3.9', '3.10', '3.11', '3.12', 'pypy3.8', 'pypy3.9', 'pypy3.10']
 
         steps:
             - name: Checkout
-              uses: actions/checkout@v2
+              uses: actions/checkout@v3
 
             - name: Set up Python ${{ matrix.python-version }}
-              uses: actions/setup-python@v2
+              uses: actions/setup-python@v4
               with:
                   python-version: ${{ matrix.python-version }}
 
             - name: Install prerequisites
               run: |
                   brew install suite-sparse
-                  brew install libomp
 
-                  # This is needed to import numpy in pypy3 (but not needed for
-                  # pypy2 and CPython)
-                  # brew install openblas
-                  # OPENBLAS="$(brew --prefix openblas)"
-                  # brew install lapack
-                  # pip3 install numpy
-                  
-            # - name: Install CUDA
-            #   uses: Jimver/cuda-toolkit@v0.2.1
-            #   id: cuda-toolkit
-            #   with:
-            #       cuda: '11.2.2'
+                  # Starting from libomp>=15.0, the libomp installation in homebrew is "keg-only",
+                  # meaning that libomp is only installed in homebrew's directory, but not moved
+                  # to /usr/local to avoid other OpenMP installations (such as with gcc's version
+                  # of OpenMP). To use the homebrew's version of OpenMP,the following symbolic
+                  # links are created. Without these, the installation will fail with the error
+                  # of "fatal error: omp.h file found"
+                  brew install libomp
+                  libomp_dir=$(brew --prefix libomp)
+                  ln -sf ${libomp_dir}/include/omp-tools.h  /usr/local/include/omp-tools.h
+                  ln -sf ${libomp_dir}/include/omp.h        /usr/local/include/omp.h
+                  ln -sf ${libomp_dir}/include/ompt.h       /usr/local/include/ompt.h
+                  ln -sf ${libomp_dir}/lib/libomp.a         /usr/local/lib/libomp.a
+                  ln -sf ${libomp_dir}/lib/libomp.dylib     /usr/local/lib/libomp.dylib
+            
+            # Install OpenBLAS when PyPy is used, since it tries to compile numpy and scipt from
+            # source, whic needs OpenBLAS
+            - name: Install package and dependencies (OpenBLAS, gfortran)
+              if: (contains(matrix.python-version, 'pypy'))
+              run: |
+                  brew install openblas
+                  brew reinstall gcc
 
             - name: Install package and dependencies
+              if: (matrix.python-version == '3.9')
               run: |
                   python -m pip install --upgrade pip
-                  python -m pip install --upgrade numpy
-                  python -m pip install --upgrade .[extra]
+                  python -m pip install --upgrade . -vvv
               env:
                   USE_LONG_INT: 0
                   USE_UNSIGNED_LONG_INT: 0
                   USE_CBLAS: 0
                   USE_CUDA: 0
 
+            # For python 3.10, 3.11 do not install extras (sparsesuite)
+            - name: Install package and dependencies
+              if: (!contains(matrix.python-version, 'pypy'))
+              run: |
+                  python -m pip install --upgrade pip
+                  python -m pip install --upgrade . -vvv
+              env:
+                  USE_LONG_INT: 0
+                  USE_UNSIGNED_LONG_INT: 0
+                  USE_CBLAS: 0
+                  USE_CUDA: 0
+
+            # For PyPy, export OpenBLAS pkgconfig file, when pypy tries to build scipy from source
+            # which needs OpenBLAS
+            - name: Install package and dependencies
+              if: (contains(matrix.python-version, 'pypy'))
+              run: |
+                  python -m pip install --upgrade pip
+                  python -m pip install --upgrade . -vvv
+              env:
+                  PKG_CONFIG_PATH: /usr/local/opt/openblas/lib/pkgconfig
+                  USE_LONG_INT: 0
+                  USE_UNSIGNED_LONG_INT: 0
+                  USE_CBLAS: 0
+                  USE_CUDA: 0
+
+            # Despite the package is built on both cpython and pypy, here we
+            # only test it on cpython, not on pypy, since many other required
+            # dependencies (like matplotlib, etc) need to be compiled on pypy.
             - name: Test
+              if: (!contains(matrix.python-version, 'pypy'))
               run: |
                   python -m pip install --upgrade pytest
                   python -m pip install --upgrade pytest-cov

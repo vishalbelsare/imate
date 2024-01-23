@@ -87,6 +87,8 @@
 /// \sa            cu_golub_kahn_bidiagonalizaton,
 ///                cu_lanczos_bidiagonalization
 ///
+/// \param[in]     cublas_handle
+///                The cuBLAS object handle.
 /// \param[in]     V
 ///                1D coalesced array of vectors representing a 2D array. The
 ///                length of this 1D array is \c vector_size*num_vectors, which
@@ -95,7 +97,7 @@
 /// \param[in]     vector_size
 ///                The length of each vector. If we assume \c V indicates a 2D
 ///                vector, this is the number of rows of \c V.
-/// \param[in]     num_vector
+/// \param[in]     num_vectors
 ///                The number of column vectors. If we assume \c V indicates a
 ///                2D vector, this the number of columns of \c V.
 /// \param[in]     last_vector
@@ -109,7 +111,7 @@
 ///                vector is given by \c last_vector. This index is a number
 ///                between \c 0 and \c num_vectors-1. The index of the last
 ///                i-th vector is winding back from the last vector by
-///                $last_vector-i+1 \mod num_vectors$.
+///                <tt>last_vector-i+1 mod num_vectors</tt>.
 /// \param[in]     num_ortho
 ///                The number of vectors to be orthogonalized starting from the
 ///                last vector. \c 0 indicates no orthogonalization will be
@@ -164,7 +166,7 @@ void cuOrthogonalization<DataType>::gram_schmidt_process(
     DataType norm;
     DataType norm_v;
     DataType epsilon = std::numeric_limits<DataType>::epsilon();
-    DataType distance;
+    DataType distance2;
 
     // Iterate over vectors
     for (IndexType step=0; step < num_steps; ++step)
@@ -209,11 +211,11 @@ void cuOrthogonalization<DataType>::gram_schmidt_process(
                     cublas_handle, v, vector_size);
 
             // Compute distance between the j-th vector and vector v
-            distance = sqrt(norm_v*norm_v - 2.0*inner_prod + norm*norm);
+            distance2 = norm_v*norm_v - 2.0*inner_prod + norm*norm;
 
             // If distance is zero, do not reorthogonalize i-th against
             // the j-th vector.
-            if (distance < 2.0 * epsilon * sqrt(vector_size))
+            if (distance2 < 2.0 * epsilon * vector_size)
             {
                 continue;
             }
@@ -256,6 +258,8 @@ void cuOrthogonalization<DataType>::gram_schmidt_process(
 ///                orthogonalization fails since not all vectors are
 ///                independent, and at least one vector becomes zero.
 ///
+/// \param[in]     cublas_handle
+///                The cuBLAS object handle.
 /// \param[in,out] vectors
 ///                2D array of size \c vector_size*num_vectors. This array will
 ///                be modified in-place and will be output of this function.
@@ -282,11 +286,10 @@ void cuOrthogonalization<DataType>::orthogonalize_vectors(
 
     IndexType i = 0;
     IndexType j;
-    IndexType start = 0;
+    IndexType start_j;
     DataType inner_prod;
-    DataType norm;
+    DataType norm_j;
     DataType norm_i;
-    DataType distance;
     DataType epsilon = std::numeric_limits<DataType>::epsilon();
     IndexType success = 1;
     IndexType max_num_trials = 20;
@@ -312,18 +315,22 @@ void cuOrthogonalization<DataType>::orthogonalize_vectors(
         if (static_cast<LongIndexType>(i) > vector_size)
         {
             // When vector_size is smaller than i, it is fine to cast to signed
-            start = i - static_cast<IndexType>(vector_size);
+            start_j = i - static_cast<IndexType>(vector_size);
+        }
+        else
+        {
+            start_j = 0;
         }
 
         // Reorthogonalize against previous vectors
-        for (j=start; j < i; ++j)
+        for (j=start_j; j < i; ++j)
         {
             // Norm of the j-th vector
-            norm = cuVectorOperations<DataType>::euclidean_norm(
+            norm_j = cuVectorOperations<DataType>::euclidean_norm(
                     cublas_handle, &vectors[j*vector_size], vector_size);
 
             // Check norm
-            if (norm < epsilon * sqrt(vector_size))
+            if (norm_j < epsilon * sqrt(vector_size))
             {
                 std::cerr << "WARNING: norm of the given vector is too " \
                           << " small. Cannot reorthogonalize against zero" \
@@ -338,46 +345,7 @@ void cuOrthogonalization<DataType>::orthogonalize_vectors(
                     &vectors[j*vector_size], vector_size);
 
             // Scale of subtraction
-            DataType scale = inner_prod / (norm * norm);
-
-            // If scale is is 1, it is possible that i-th and j-th vectors are
-            // identical (or close). So, instead of subtracting them,
-            // regenerate new i-th vector.
-            if (std::abs(scale - 1.0) <= 2.0 * epsilon)
-            {
-                // Norm of the i-th vector
-                norm_i = cuVectorOperations<DataType>::euclidean_norm(
-                        cublas_handle, &vectors[i*vector_size], vector_size);
-
-                // Compute distance between i-th and j-th vector
-                distance = sqrt(norm_i*norm_i - 2.0*inner_prod + norm*norm);
-
-                // If distance is zero, do not reorthogonalize i-th against
-                // vector j-th and the subsequent vectors after j-th.
-                if (distance < 2.0 * epsilon * sqrt(vector_size))
-                {
-                    // Allocate buffer
-                    if (buffer == NULL)
-                    {
-                        buffer = new DataType[vector_size];
-                    }
-
-                    // Regenerate new random vector on buffer
-                    RandomArrayGenerator<DataType>::generate_random_array(
-                            random_number_generator, buffer,
-                            vector_size, num_threads);
-
-                    // Copy buffer to the i-th vector on device
-                    CudaInterface<DataType>::copy_to_device(
-                            buffer, vector_size, &vectors[i*vector_size]);
-
-                    // Repeat the reorthogonalization for i-th vector against
-                    // all previous vectors again.
-                    success = 0;
-                    ++num_trials;
-                    break;
-                }
-            }
+            DataType scale = inner_prod / (norm_j * norm_j);
 
             // Subtraction
             cuVectorOperations<DataType>::subtract_scaled_vector(

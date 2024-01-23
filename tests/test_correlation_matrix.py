@@ -20,12 +20,16 @@ import os
 os.environ['IMATE_NO_DISPLAY'] = 'True'   # define before importing imate
 from imate.sample_matrices import correlation_matrix               # noqa: E402
 
+import warnings                                                    # noqa: E402
+warnings.resetwarnings()
+warnings.filterwarnings("error")
+
 
 # =================
 # remove saved plot
 # =================
 
-def remove_saved_plot():
+def remove_saved_plot(filename):
     """
     When the option ``plot=True`` is used in :mod:`imate.correlationmatrix`, a
     file named ``CorrelationMatrix.svg`` is saved in the current directory.
@@ -33,16 +37,17 @@ def remove_saved_plot():
     """
 
     save_dir = os.getcwd()
-    filename_svg = 'CorrelationMatrix' + '.svg'
-    save_fullname_svg = os.path.join(save_dir, filename_svg)
+    fullname = os.path.join(save_dir, filename)
 
-    if os.path.exists(save_fullname_svg):
+    if os.path.exists(fullname):
         try:
-            os.remove(save_fullname_svg)
+            os.remove(fullname)
+            print('File %s is deleted.' % fullname)
         except OSError:
             pass
 
-    print('File %s is deleted.' % save_fullname_svg)
+    else:
+        print('File %s does not exists.' % fullname)
 
 
 # =======================
@@ -65,7 +70,10 @@ def test_correlation_matrix():
                        plot=True)
 
     # Remove saved plot
-    remove_saved_plot()
+    filename_svg = 'correlation_matrix' + '.svg'
+    filename_pdf = 'correlation_matrix' + '.pdf'
+    remove_saved_plot(filename_svg)
+    remove_saved_plot(filename_pdf)
 
 
 # ===========

@@ -11,7 +11,7 @@
 # Imports
 # =======
 
-from libc.stdint cimport uint64_t
+from libc.stdint cimport int64_t, uint64_t
 
 
 # =======
@@ -22,6 +22,9 @@ cdef extern from "random_number_generator.h":
 
     cdef cppclass RandomNumberGenerator:
 
-        RandomNumberGenerator() except +
-        RandomNumberGenerator(int num_threads_) except +
-        uint64_t next(int thread_id) nogil
+        RandomNumberGenerator() except + nogil
+        RandomNumberGenerator(const int num_threads_) except + nogil
+        RandomNumberGenerator(
+                const int num_threads_,
+                const int64_t seed) except + nogil
+        uint64_t next(const int thread_id) nogil

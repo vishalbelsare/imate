@@ -1,22 +1,26 @@
 #! /usr/bin/env python
 
+# SPDX-FileCopyrightText: Copyright 2021, Siavash Ameli <sameli@berkeley.edu>
+# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-FileType: SOURCE
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the license found in the LICENSE.txt file in the root directory
+# of this source tree.
+
 # =======
 # Imports
 # =======
 
 import sys
-import os
 from os.path import join
 import getopt
-import re
 import numpy
 import pickle
-import platform
-import subprocess
-import multiprocessing
 from datetime import datetime
+import imate
 from imate import traceinv, logdet
-from imate.sample_matrices import band_matrix
+from imate.sample_matrices import toeplitz
 
 
 # ===============
@@ -91,36 +95,6 @@ Required arguments (choose at least one, or more):
     return arguments
 
 
-# ==================
-# get processor name
-# ==================
-
-def get_processor_name():
-    """
-    Gets the name of CPU.
-
-    For windows operating system, this function still does not get the full
-    brand name of the cpu.
-    """
-
-    if platform.system() == "Windows":
-        return platform.processor()
-
-    elif platform.system() == "Darwin":
-        os.environ['PATH'] = os.environ['PATH'] + os.pathsep + '/usr/sbin'
-        command = "sysctl -n machdep.cpu.brand_string"
-        return subprocess.getoutput(command).strip()
-
-    elif platform.system() == "Linux":
-        command = "cat /proc/cpuinfo"
-        all_info = subprocess.getoutput(command).strip()
-        for line in all_info.split("\n"):
-            if "model name" in line:
-                return re.sub(".*model name.*:", "", line, 1)[1:]
-
-    return ""
-
-
 # ===============
 # compare methods
 # ===============
@@ -146,9 +120,10 @@ def compare_methods(M, config, matrix, arguments):
         print('\tslq, repeat %d ...' % (i+1), end="")
         trace_s[i], info_s = function(
                 M,
-                method='slq',
-                exponent=config['exponent'],
                 gram=config['gram'],
+                p=config['exponent'],
+                return_info=True,
+                method='slq',
                 min_num_samples=config['min_num_samples'],
                 max_num_samples=config['max_num_samples'],
                 error_rtol=config['error_rtol'],
@@ -191,8 +166,9 @@ def compare_methods(M, config, matrix, arguments):
             print('\thutchinson, repeat %d ...' % (i+1), end="")
             trace_h[i], info_h = function(
                     M,
+                    p=config['exponent'],
+                    return_info=True,
                     method='hutchinson',
-                    exponent=config['exponent'],
                     assume_matrix='sym',
                     min_num_samples=config['min_num_samples'],
                     max_num_samples=config['max_num_samples'],
@@ -233,8 +209,9 @@ def compare_methods(M, config, matrix, arguments):
         if arguments['function'] == 'traceinv':
             trace_c, info_c = function(
                     M,
+                    p=config['exponent'],
+                    return_info=True,
                     method='cholesky',
-                    exponent=config['exponent'],
                     cholmod=None,
                     invert_cholesky=False)
 
@@ -247,18 +224,20 @@ def compare_methods(M, config, matrix, arguments):
             # it only uses scipy.sparse.cholesky
             trace_c, info_c = function(
                     M,
+                    p=config['exponent'],
+                    return_info=True,
                     method='cholesky',
-                    cholmod=None,
-                    exponent=config['exponent'])
+                    cholmod=None)
 
             # Is cholmod is used, also compute once more without cholmod
             if info_c['solver']['cholmod_used'] is True and \
                     M.shape[0] <= matrix['max_cholesky_size_2']:
                 trace_c2, info_c2 = function(
                         M,
+                        p=config['exponent'],
+                        return_info=True,
                         method='cholesky',
-                        cholmod=False,
-                        exponent=config['exponent'])
+                        cholmod=False)
             else:
                 trace_c2 = numpy.nan
                 info_c2 = {}
@@ -328,8 +307,8 @@ def main(argv):
     }
 
     devices = {
-        'cpu_name': get_processor_name(),
-        'num_all_cpu_threads': multiprocessing.cpu_count(),
+        'cpu_name': imate.device.get_processor_name(),
+        'num_all_cpu_threads': imate.device.get_num_cpu_threads(),
     }
 
     data_results_32bit = []
@@ -349,9 +328,9 @@ def main(argv):
             print('Processing %s matrix size: %d ...' % ('32-bit', size))
 
             # Generate matrix
-            M = band_matrix(matrix['band_alpha'], matrix['band_beta'], size,
-                            gram=matrix['gram'],
-                            format=matrix['format'], dtype=r'float32')
+            M = toeplitz(matrix['band_alpha'], matrix['band_beta'], size,
+                         gram=matrix['gram'], format=matrix['format'],
+                         dtype=r'float32')
 
             # Run a benchmark for all algorithms
             result = compare_methods(M, config, matrix, arguments)
@@ -367,9 +346,9 @@ def main(argv):
             print('Processing %s matrix size: %d ...' % ('64-bit', size))
 
             # Generate matrix
-            M = band_matrix(matrix['band_alpha'], matrix['band_beta'], size,
-                            gram=matrix['gram'],
-                            format=matrix['format'], dtype=r'float64')
+            M = toeplitz(matrix['band_alpha'], matrix['band_beta'], size,
+                         gram=matrix['gram'], format=matrix['format'],
+                         dtype=r'float64')
 
             # Run a benchmark for all algorithms
             result = compare_methods(M, config, matrix, arguments)
@@ -385,9 +364,9 @@ def main(argv):
             print('Processing %s matrix size: %d ...' % ('128-bit', size))
 
             # Generate matrix
-            M = band_matrix(matrix['band_alpha'], matrix['band_beta'], size,
-                            gram=matrix['gram'],
-                            format=matrix['format'], dtype=r'float128')
+            M = toeplitz(matrix['band_alpha'], matrix['band_beta'], size,
+                         gram=matrix['gram'],
+                         format=matrix['format'], dtype=r'float128')
 
             # Run a benchmark for all algorithms
             result = compare_methods(M, config, matrix, arguments)
